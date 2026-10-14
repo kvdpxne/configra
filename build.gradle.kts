@@ -19,29 +19,11 @@ java {
 }
 
 dependencies {
-  // Server JAR, compileOnly because the server provides it at runtime.
-  // We use fileTree to automatically pull in all JARs from the directory, new libraries do not require modifying build.gradle.kts.
-  compileOnly(fileTree(".local_libraries") {
-    include("*.jar")
-  })
-
   testImplementation(libs.junit.jupiter)
   testRuntimeOnly(libs.junit.platform.launcher)
 }
 
 tasks {
-
-  processResources {
-    val properties = mapOf(
-      "version" to rootProject.version,
-      "description" to (rootProject.description ?: "")
-    )
-    inputs.properties(properties)
-    filteringCharset = Charsets.UTF_8.name()
-    filesMatching(listOf("plugin.yaml", "plugin.yml")) {
-      expand(properties)
-    }
-  }
 
   test {
     useJUnitPlatform()
@@ -68,40 +50,6 @@ tasks {
   //    mergeServiceFiles()
   //    minimize()
   //}
-
-  register("projectInfo") {
-    group = "help"
-    description = "Wypisuje podstawowe informacje o projekcie"
-
-    // Wartości obliczone w czasie konfiguracji (bezpieczne dla configuration cache)
-    val projectName = project.name
-    val projectGroup = project.group.toString()
-    val projectVersion = project.version.toString()
-    val projectDescription = project.description ?: ""
-    val javaVersion = JavaVersion.current().toString()
-    val toolchainVersion = java.toolchain.languageVersion.get().toString()
-    val gradleVersion = gradle.gradleVersion
-
-    // Wejścia zadania — Gradle wie, kiedy unieważnić cache
-    inputs.property("projectName", projectName)
-    inputs.property("projectGroup", projectGroup)
-    inputs.property("projectVersion", projectVersion)
-    inputs.property("projectDescription", projectDescription)
-
-    doLast {
-      println(
-        """
-            |Projekt:      $projectName
-            |Grupa:        $projectGroup
-            |Wersja:       $projectVersion
-            |Opis:         $projectDescription
-            |Java:         $javaVersion
-            |Toolchain:    $toolchainVersion
-            |Gradle:       $gradleVersion
-            """.trimMargin()
-      )
-    }
-  }
 }
 
 publishing {
