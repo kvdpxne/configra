@@ -1,0 +1,85 @@
+# Normalize to LF
+*                   text=auto eol=lf
+
+# POSIX shell requires LF
+/gradlew            text eol=lf
+
+# cmd.exe requires CRLF
+*.bat               text eol=crlf
+*.cmd               text eol=crlf
+
+# PowerShell 5.x requires CRLF
+*.ps1               text eol=crlf
+
+# Compiler expects LF; diff driver improves readability
+*.java              text eol=lf diff=java
+*.kt                text eol=lf diff=kotlin
+*.kts               text eol=lf diff=kotlin
+*.groovy            text eol=lf
+
+# LF avoids parsing issues
+*.gradle            text eol=lf
+
+# Shebang requires LF
+*.sh                text eol=lf
+*.bash              text eol=lf
+*.zsh               text eol=lf
+*.fish              text eol=lf
+
+# Deterministic hashes and clean diffs
+*.yml               text eol=lf
+*.yaml              text eol=lf
+*.json              text eol=lf
+*.json5             text eol=lf
+*.properties        text eol=lf
+*.toml              text eol=lf
+*.xml               text eol=lf
+*.iml               text eol=lf
+
+# Resource loaders expect LF
+*.lang              text eol=lf
+*.mcmeta            text eol=lf
+*.accesswidener     text eol=lf
+
+# Reduce diff noise
+*.md                text eol=lf diff=markdown
+*.txt               text eol=lf
+
+# Prevent self-alteration
+.gitattributes      text eol=lf
+.gitignore          text eol=lf
+.editorconfig       text eol=lf
+
+# Byte integrity
+*.jar               binary
+*.class             binary
+*.so                binary
+*.dll               binary
+*.dylib             binary
+*.exe               binary
+*.zip               binary
+*.tar               binary
+*.gz                binary
+*.7z                binary
+*.rar               binary
+*.png               binary
+*.jpg               binary
+*.jpeg              binary
+*.gif               binary
+*.ico               binary
+*.bmp               binary
+*.tga               binary
+*.webp              binary
+*.ogg               binary
+*.wav               binary
+*.mp3               binary
+*.flac              binary
+*.ttf               binary
+*.otf               binary
+*.woff              binary
+*.woff2             binary
+*.pdf               binary
+*.nbt               binary
+*.schematic         binary
+*.schem             binary
+*.litematic         binary

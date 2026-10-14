@@ -1,0 +1,21 @@
+# Enforces consistent code style across editors and IDEs.
+# Spec: https://editorconfig.org/
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_size = 2
+indent_style = space
+insert_final_newline = false
+max_line_length = 120
+tab_width = 2
+trim_trailing_whitespace = true
+
+[*.md]
+# Two trailing spaces encode a hard line break in Markdown; stripping them alters rendering.
+trim_trailing_whitespace = false
+
+[Makefile]
+# GNU Make requires tab-indented recipes; spaces cause silent syntax errors.
+indent_style = tab

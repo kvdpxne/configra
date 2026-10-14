@@ -1,0 +1,6 @@
+name: 'YourPluginName'
+version: '${version}'
+main: 'me.kvd.plugin.YourPluginClassName'
+authors: ['kvdpxne', 'mcdtm team']
+description: '${description}'
+website: 'https://github.com/mcdtm/'
