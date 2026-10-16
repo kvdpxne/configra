@@ -1,8 +1,14 @@
 package me.kvdpxne.properties;
 
 import java.io.IOException;
+import java.nio.file.ClosedWatchServiceException;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardWatchEventKinds;
+import java.nio.file.WatchEvent;
+import java.nio.file.WatchKey;
+import java.nio.file.WatchService;
 import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -13,111 +19,166 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
- * Polls a config file and invokes a callback whenever its modification time
- * changes. Backed by a daemon thread.
+ * Watches a config file and invokes a callback whenever its content has
+ * changed.
+ *
+ * <h2>Modes</h2>
+ * <ul>
+ *   <li>{@link WatchMode#POLLING} — checks {@code Files.getLastModifiedTime}
+ *       at a fixed interval (default 500&nbsp;ms). Predictable, works on
+ *       every filesystem including NFS, never misses a change that alters
+ *       mtime. This is the default.</li>
+ *   <li>{@link WatchMode#EVENT_DRIVEN} — uses the OS-native
+ *       {@link WatchService}. Lower idle CPU, but may miss events under
+ *       buffer overflow (Windows) and is not supported on every filesystem
+ *       (NFS, some FUSE mounts).</li>
+ * </ul>
  *
  * <p>When {@code format} and {@code parseOptions} are omitted, the file is
  * loaded via {@link ConfigFile#load(Path)}, which selects the format from
  * the file extension and applies format-appropriate parse options
  * ({@link ParseOptions#iniDefaults()} for {@code .ini}).</p>
+ *
+ * <p>The callback runs on an internal daemon thread. Callers that touch
+ * thread-unsafe state should marshal the work onto their own executor.</p>
  */
 public final class PropertiesWatcher implements AutoCloseable {
 
   static final String THREAD_PREFIX = "config-watcher-";
 
   private static final long POLL_INTERVAL_MS = 500L;
+  private static final Consumer<IOException> SILENT_ERROR_HANDLER =
+    ignored -> {
+      // Silent by default; callers supply a handler when they care.
+    };
+
+  /**
+   * Selects the underlying change-detection mechanism.
+   */
+  public enum WatchMode {
+    /**
+     * Poll {@code Files.getLastModifiedTime} at a fixed interval.
+     */
+    POLLING,
+    /**
+     * Use the OS-native {@link WatchService}.
+     */
+    EVENT_DRIVEN
+  }
 
   private final Path source;
-  private final ConfigFormat format;         // nullable → auto-detect
-  private final ParseOptions parseOptions;   // nullable → format default
+  private final ConfigFormat format;
+  private final ParseOptions parseOptions;
+  private final WatchMode mode;
+  private final long pollIntervalMs;
   private final Consumer<ConfigFile> onChange;
   private final Consumer<IOException> onError;
+
+  // Polling state.
   private final ScheduledExecutorService scheduler;
   private final AtomicLong lastModified = new AtomicLong();
-  private final AtomicBoolean closed = new AtomicBoolean();
+
+  // Event-driven state.
+  private final WatchService watchService;
+  private final Thread eventThread;
+
+  private final AtomicBoolean closed = new AtomicBoolean(false);
 
   private PropertiesWatcher(final Path source,
                             final ConfigFormat format,
                             final ParseOptions parseOptions,
+                            final WatchMode mode,
+                            final long pollIntervalMs,
                             final Consumer<ConfigFile> onChange,
-                            final Consumer<IOException> onError) {
+                            final Consumer<IOException> onError)
+    throws IOException {
     this.source = source;
     this.format = format;
     this.parseOptions = parseOptions;
+    this.mode = mode;
+    this.pollIntervalMs = pollIntervalMs;
     this.onChange = onChange;
     this.onError = onError;
-    this.scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
-      final Thread thread = new Thread(runnable,
+
+    if (WatchMode.EVENT_DRIVEN == mode) {
+      this.watchService = FileSystems.getDefault().newWatchService();
+      this.scheduler = null;
+      this.eventThread = new Thread(this::eventLoop,
         THREAD_PREFIX + source.getFileName());
-      thread.setDaemon(true);
-      return thread;
-    });
-    this.lastModified.set(this.readModificationTime());
+      this.eventThread.setDaemon(true);
+      this.registerDirectory();
+    } else {
+      this.watchService = null;
+      this.scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        final Thread thread = new Thread(runnable,
+          THREAD_PREFIX + source.getFileName());
+        thread.setDaemon(true);
+        return thread;
+      });
+      this.eventThread = null;
+      this.lastModified.set(this.readModificationTime());
+    }
   }
 
-  // ----- Factories: default (auto-detect) -----
+  // ----- Public factories: default (POLLING, auto-detect) -----
 
   public static PropertiesWatcher watch(final Path source,
                                         final Consumer<ConfigFile> onChange)
     throws IOException {
-    return watch(source, null, null, onChange, silentErrorHandler());
+    return watch(source, WatchMode.POLLING, null, null, onChange,
+      SILENT_ERROR_HANDLER);
   }
 
   public static PropertiesWatcher watch(final Path source,
                                         final Consumer<ConfigFile> onChange,
                                         final Consumer<IOException> onError)
     throws IOException {
-    return watch(source, null, null, onChange, onError);
+    return watch(source, WatchMode.POLLING, null, null, onChange, onError);
   }
 
-  // ----- Factories: explicit parse options -----
+  // ----- Public factories: explicit mode -----
 
   public static PropertiesWatcher watch(final Path source,
-                                        final ParseOptions parseOptions,
+                                        final WatchMode mode,
                                         final Consumer<ConfigFile> onChange)
     throws IOException {
-    return watch(source, null, parseOptions, onChange,
-      silentErrorHandler());
+    return watch(source, mode, null, null, onChange, SILENT_ERROR_HANDLER);
   }
 
   public static PropertiesWatcher watch(final Path source,
-                                        final ParseOptions parseOptions,
+                                        final WatchMode mode,
                                         final Consumer<ConfigFile> onChange,
                                         final Consumer<IOException> onError)
     throws IOException {
-    return watch(source, null, parseOptions, onChange, onError);
+    return watch(source, mode, null, null, onChange, onError);
   }
 
-  // ----- Factories: explicit format + options -----
-
   public static PropertiesWatcher watch(final Path source,
-                                        final ConfigFormat format,
                                         final ParseOptions parseOptions,
                                         final Consumer<ConfigFile> onChange)
     throws IOException {
-    return watch(source, format, parseOptions, onChange,
-      silentErrorHandler());
+    return watch(source, WatchMode.POLLING, null, parseOptions, onChange,
+      SILENT_ERROR_HANDLER);
   }
 
   public static PropertiesWatcher watch(final Path source,
+                                        final WatchMode mode,
                                         final ConfigFormat format,
                                         final ParseOptions parseOptions,
                                         final Consumer<ConfigFile> onChange,
                                         final Consumer<IOException> onError)
     throws IOException {
     Objects.requireNonNull(source, "source");
+    Objects.requireNonNull(mode, "mode");
     Objects.requireNonNull(onChange, "onChange");
     Objects.requireNonNull(onError, "onError");
     if (!Files.isRegularFile(source)) {
       throw new IOException("Not a regular file: " + source);
     }
     final PropertiesWatcher watcher = new PropertiesWatcher(
-      source, format, parseOptions, onChange, onError);
-    watcher.scheduler.scheduleWithFixedDelay(
-      watcher::tick,
-      POLL_INTERVAL_MS,
-      POLL_INTERVAL_MS,
-      TimeUnit.MILLISECONDS);
+      source, format, parseOptions, mode,
+      POLL_INTERVAL_MS, onChange, onError);
+    watcher.start();
     return watcher;
   }
 
@@ -126,17 +187,11 @@ public final class PropertiesWatcher implements AutoCloseable {
   public static PropertiesWatcher watchDiff(final Path source,
                                             final Consumer<ConfigDiff> onChange)
     throws IOException {
-    return watchDiff(source, null, null, onChange);
+    return watchDiff(source, WatchMode.POLLING, null, null, onChange);
   }
 
   public static PropertiesWatcher watchDiff(final Path source,
-                                            final ParseOptions parseOptions,
-                                            final Consumer<ConfigDiff> onChange)
-    throws IOException {
-    return watchDiff(source, null, parseOptions, onChange);
-  }
-
-  public static PropertiesWatcher watchDiff(final Path source,
+                                            final WatchMode mode,
                                             final ConfigFormat format,
                                             final ParseOptions parseOptions,
                                             final Consumer<ConfigDiff> onChange)
@@ -145,7 +200,7 @@ public final class PropertiesWatcher implements AutoCloseable {
     Objects.requireNonNull(onChange, "onChange");
     final AtomicReference<ConfigFile> previous = new AtomicReference<>(
       loadInitial(source, format, parseOptions));
-    return watch(source, format, parseOptions, updated -> {
+    return watch(source, mode, format, parseOptions, updated -> {
       final ConfigFile old = previous.getAndSet(updated);
       if (null == old) {
         return;
@@ -154,16 +209,14 @@ public final class PropertiesWatcher implements AutoCloseable {
       if (!diff.isEmpty()) {
         onChange.accept(diff);
       }
-    });
+    }, SILENT_ERROR_HANDLER);
   }
 
-  // ----- Internal -----
+  // ----- Startup (internal) -----
 
-  private static Consumer<IOException> silentErrorHandler() {
-    return ignored -> {
-      // Silent by default; callers supply a handler when they care.
-    };
-  }
+  // (constructor already initialises the backend; nothing to do here)
+
+  // ----- Loading helpers -----
 
   private static ConfigFile loadInitial(final Path source,
                                         final ConfigFormat format,
@@ -180,6 +233,8 @@ public final class PropertiesWatcher implements AutoCloseable {
       : ConfigFile.load(this.source, this.format, this.parseOptions);
   }
 
+  // ----- Polling implementation -----
+
   private long readModificationTime() {
     try {
       return Files.getLastModifiedTime(this.source).toMillis();
@@ -188,7 +243,15 @@ public final class PropertiesWatcher implements AutoCloseable {
     }
   }
 
-  private void tick() {
+  private void startPolling() {
+    this.scheduler.scheduleWithFixedDelay(
+      this::pollTick,
+      this.pollIntervalMs,
+      this.pollIntervalMs,
+      TimeUnit.MILLISECONDS);
+  }
+
+  private void pollTick() {
     if (this.closed.get()) {
       return;
     }
@@ -207,10 +270,102 @@ public final class PropertiesWatcher implements AutoCloseable {
     }
   }
 
+  // ----- Event-driven implementation -----
+
+  private void registerDirectory() throws IOException {
+    final Path dir = this.source.toAbsolutePath().getParent();
+    if (null == dir) {
+      throw new IOException(
+        "Cannot resolve parent directory for " + this.source);
+    }
+    dir.register(this.watchService,
+      StandardWatchEventKinds.ENTRY_MODIFY,
+      StandardWatchEventKinds.ENTRY_CREATE,
+      StandardWatchEventKinds.ENTRY_DELETE);
+  }
+
+  private void eventLoop() {
+    final Path fileName = this.source.getFileName();
+    while (!this.closed.get()) {
+      final WatchKey key;
+      try {
+        key = this.watchService.take();
+      } catch (final InterruptedException exception) {
+        Thread.currentThread().interrupt();
+        return;
+      } catch (final ClosedWatchServiceException exception) {
+        return;
+      }
+      if (null == key) {
+        continue;
+      }
+      boolean relevant = false;
+      try {
+        for (final WatchEvent<?> event : key.pollEvents()) {
+          if (StandardWatchEventKinds.OVERFLOW == event.kind()) {
+            // Lost events; treat as a change to be safe.
+            relevant = true;
+            continue;
+          }
+          final Object context = event.context();
+          if (context instanceof Path changed
+            && changed.getFileName().equals(fileName)) {
+            relevant = true;
+          }
+        }
+      } finally {
+        final boolean valid = key.reset();
+        if (!valid) {
+          // Directory deleted or inaccessible; stop watching.
+          return;
+        }
+      }
+      if (relevant && !this.closed.get()) {
+        try {
+          this.onChange.accept(this.loadCurrent());
+        } catch (final IOException exception) {
+          this.onError.accept(exception);
+        } catch (final RuntimeException ignored) {
+          // Never let a callback failure kill the watcher thread.
+        }
+      }
+    }
+  }
+
+  private void startEventDriven() {
+    this.eventThread.start();
+  }
+
+  // ----- Lifecycle -----
+
+  /**
+   * Starts the watcher. Called automatically by the factory methods.
+   */
+  void start() {
+    if (WatchMode.EVENT_DRIVEN == this.mode) {
+      this.startEventDriven();
+    } else {
+      this.startPolling();
+    }
+  }
+
   @Override
   public void close() {
-    if (this.closed.compareAndSet(false, true)) {
+    if (!this.closed.compareAndSet(false, true)) {
+      return;
+    }
+    if (null != this.scheduler) {
       this.scheduler.shutdownNow();
+    }
+    if (null != this.watchService) {
+      try {
+        this.watchService.close();
+      } catch (final IOException ignored) {
+        // Closing a watch service is best-effort.
+      }
+    }
+    if (null != this.eventThread) {
+      this.eventThread.interrupt();
     }
   }
 }

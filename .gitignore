@@ -60,6 +60,8 @@ replay_pid*
 .idea/**/gradle.xml
 .idea/**/libraries
 .idea/**/mongoSettings.xml
+.idea/**/misc.xml
+.idea/**/modules.xml
 *.iws
 *.iml
 *.ipr

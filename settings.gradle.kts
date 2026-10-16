@@ -24,4 +24,22 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "plugin-template"
+include(
+  "api",
+  "core",
+  "escape",
+  "exceptions",
+  "schema",
+  "spi",
+  // Formats
+  "formats:ini",
+  "formats:properties",
+  // Extras
+  "extras:diff",
+  "extras:io",
+  "extras:watch",
+  "extras:util"
+)
+
+rootProject.name = "properties"
+include("options")

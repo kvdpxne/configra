@@ -14,10 +14,11 @@ import me.kvdpxne.properties.exceptions.PropertiesException;
 /**
  * Bidirectional converter between a raw string and a strongly typed value.
  *
- * <p>Stateless codecs are exposed as constants, so that
- * {@link PropertyKey} factories return shared instances. This makes
- * {@code PropertyCodec} implementations monomorphic at typical call sites,
- * which the JIT can inline.</p>
+ * <p>Stateless codecs are exposed as constants. {@link #enumeration(Class)}
+ * caches its result per {@code Class}, so repeated calls with the same enum
+ * type return the same instance — which keeps {@link PropertyKey} equality
+ * (and therefore the per-instance decode cache in
+ * {@link ConfigFile}) working as intended.</p>
  *
  * @param <T> the target type
  */
@@ -27,23 +28,33 @@ public interface PropertyCodec<T> {
 
   String encode(T value) throws PropertiesException;
 
+  /**
+   * Returns the runtime type this codec produces. Used by batch mutation
+   * operations to reject mismatched values at insertion time. Defaults to
+   * {@link Object#getClass() Object.class}, which disables the check —
+   * codecs built via {@link #of(Function, Function)} keep this default.
+   */
+  default Class<?> valueType() {
+    return Object.class;
+  }
+
   // ----- Built-in codecs -----
 
-  PropertyCodec<String> STRING = of(value -> value, value -> value);
+  PropertyCodec<String> STRING = of(String.class, value -> value, value -> value);
 
-  PropertyCodec<Integer> INTEGER = of(
+  PropertyCodec<Integer> INTEGER = of(Integer.class,
     value -> Integer.parseInt(value.trim()),
     Object::toString);
 
-  PropertyCodec<Long> LONG = of(
+  PropertyCodec<Long> LONG = of(Long.class,
     value -> Long.parseLong(value.trim()),
     Object::toString);
 
-  PropertyCodec<Double> DOUBLE = of(
+  PropertyCodec<Double> DOUBLE = of(Double.class,
     value -> Double.parseDouble(value.trim()),
     Object::toString);
 
-  PropertyCodec<Boolean> BOOLEAN = of(
+  PropertyCodec<Boolean> BOOLEAN = of(Boolean.class,
     value -> {
       final String normalised = value.trim().toLowerCase(Locale.ROOT);
       return switch (normalised) {
@@ -55,31 +66,23 @@ public interface PropertyCodec<T> {
     },
     Object::toString);
 
-  PropertyCodec<Path> PATH = of(
-    value -> Paths.get(value),
+  PropertyCodec<Path> PATH = of(Path.class,
+    Paths::get,
     Path::toString);
 
-  PropertyCodec<URI> URI = of(
+  PropertyCodec<URI> URI = of(URI.class,
     java.net.URI::create,
     java.net.URI::toString);
 
-  /**
-   * Comma-separated list of trimmed, non-empty strings. Commas and
-   * backslashes inside elements are escaped as {@code \,} and {@code \\}.
-   */
-  PropertyCodec<List<String>> STRING_LIST = of(
+  PropertyCodec<List<String>> STRING_LIST = of(List.class,
     PropertyCodec::decodeStringList,
     PropertyCodec::encodeStringList);
 
-  /**
-   * ISO-8601 ({@code PT30S}) or friendly ({@code 30s}, {@code 5m},
-   * {@code 1h30m}, {@code 500ms}) duration. Always encoded as ISO-8601.
-   */
-  PropertyCodec<Duration> DURATION = of(
+  PropertyCodec<Duration> DURATION = of(Duration.class,
     PropertyCodec::parseDuration,
     Duration::toString);
 
-  // ----- Factories (return shared singletons) -----
+  // ----- Factories -----
 
   static PropertyCodec<List<String>> stringList() {
     return STRING_LIST;
@@ -89,21 +92,35 @@ public interface PropertyCodec<T> {
     return DURATION;
   }
 
+  /**
+   * Enum codec for {@code type}. The instance is cached in a
+   * {@link ClassValue}, so two keys built from the same enum class share
+   * the same codec instance — required for reliable {@code equals} on
+   * {@link PropertyKey} and for the decode cache.
+   */
+  @SuppressWarnings("unchecked")
   static <E extends Enum<E>> PropertyCodec<E> enumeration(final Class<E> type) {
     Objects.requireNonNull(type, "type");
-    return of(
-      raw -> Enum.valueOf(type, raw.trim().toUpperCase(Locale.ROOT)),
-      Enum::name);
+    return (PropertyCodec<E>) ENUM_CODECS.get(type);
   }
 
-  // ----- Generic factory -----
-
-  static <T> PropertyCodec<T> of(final Function<String, T> decoder,
+  /**
+   * Typed codec factory. The {@code type} argument is used to answer
+   * {@link #valueType()} so that batch operations can validate values at
+   * insertion time.
+   *
+   * <p>The parameter is {@code Class<?>} rather than {@code Class<T>} to
+   * allow raw class literals such as {@code List.class} or
+   * {@code Object.class} to be passed without casts. The value type
+   * {@code T} is inferred from the decoder and encoder functions.</p>
+   */
+  static <T> PropertyCodec<T> of(final Class<?> type,
+                                 final Function<String, T> decoder,
                                  final Function<T, String> encoder) {
+    Objects.requireNonNull(type, "type");
     Objects.requireNonNull(decoder, "decoder");
     Objects.requireNonNull(encoder, "encoder");
-    return new PropertyCodec<>() {
-
+    return new PropertyCodec<T>() {
       @Override
       public T decode(final String raw) throws PropertiesException {
         Objects.requireNonNull(raw, "raw");
@@ -129,10 +146,68 @@ public interface PropertyCodec<T> {
             "Cannot encode value", exception);
         }
       }
+
+      @Override
+      public Class<?> valueType() {
+        return type;
+      }
     };
   }
 
-  // ----- Internals -----
+  /**
+   * Untyped codec factory. {@link #valueType()} falls back to
+   * {@code Object.class}, so no type check runs during batch operations.
+   */
+  static <T> PropertyCodec<T> of(final Function<String, T> decoder,
+                                 final Function<T, String> encoder) {
+    return of(Object.class, decoder, encoder);
+  }
+
+  // ----- Enum codec cache -----
+
+  /**
+   * Per-{@code Class} cache of enum codecs. {@link ClassValue} is
+   * GC-friendly: entries are dropped automatically when the corresponding
+   * class is unloaded, and the lookup is a lock-free read on the hot path.
+   */
+  ClassValue<PropertyCodec<?>> ENUM_CODECS = new ClassValue<>() {
+    @Override
+    protected PropertyCodec<?> computeValue(final Class<?> type) {
+      return createEnumCodec(type);
+    }
+  };
+
+  @SuppressWarnings({"unchecked", "rawtypes"})
+  static PropertyCodec<?> createEnumCodec(final Class<?> type) {
+    return new PropertyCodec() {
+
+      @Override
+      public Object decode(final String raw) throws PropertiesException {
+        Objects.requireNonNull(raw, "raw");
+        try {
+          return Enum.valueOf((Class<? extends Enum>) type,
+            raw.trim().toUpperCase(Locale.ROOT));
+        } catch (final IllegalArgumentException exception) {
+          throw new PropertiesException(
+            "Not a valid " + type.getSimpleName()
+              + ": " + raw, exception);
+        }
+      }
+
+      @Override
+      public String encode(final Object value) throws PropertiesException {
+        Objects.requireNonNull(value, "value");
+        return ((Enum) value).name();
+      }
+
+      @Override
+      public Class<?> valueType() {
+        return type;
+      }
+    };
+  }
+
+  // ----- Internal helpers -----
 
   private static List<String> decodeStringList(final String raw) {
     if (raw.isBlank()) {

@@ -4,8 +4,20 @@ import java.util.Objects;
 import java.util.function.Supplier;
 
 /**
- * Thread-safe lazy holder. The supplier runs at most once; subsequent reads
- * return the cached value without locking.
+ * Thread-safe lazy holder for consumer use.
+ *
+ * <p>The supplier runs at most once; subsequent reads return the cached
+ * value without locking. Implementation uses double-checked locking on a
+ * {@code volatile} field, so after the first successful {@link #get()} the
+ * hot path is a plain volatile read.</p>
+ *
+ * <p><b>Scope.</b> This class is provided as a utility for callers who
+ * need one-shot initialisation of expensive values in their own code
+ * (for example, a plugin that lazily builds a plugin-name lookup table on
+ * first use). The library itself does not use {@code Lazy} internally:
+ * {@link me.kvdpxne.properties.ConfigFile} is fully eager after
+ * {@code load}, and its decode cache is a {@link java.util.concurrent.ConcurrentHashMap}
+ * keyed by {@link me.kvdpxne.properties.PropertyKey}.</p>
  *
  * @param <T> the value type
  */
@@ -22,13 +34,16 @@ public final class Lazy<T> {
     this.allowNull = allowNull;
   }
 
+  /**
+   * Creates a lazy holder whose supplier must not return {@code null}.
+   */
   public static <T> Lazy<T> of(final Supplier<T> supplier) {
     return new Lazy<>(supplier, false);
   }
 
   /**
-   * Variant that allows the supplier to return {@code null}. In that case
-   * the sentinel is cached and subsequent {@link #get} calls return
+   * Creates a lazy holder whose supplier may return {@code null}. In that
+   * case the sentinel is cached and subsequent {@link #get} calls return
    * {@code null} without re-invoking the supplier.
    */
   public static <T> Lazy<T> ofNullable(final Supplier<T> supplier) {

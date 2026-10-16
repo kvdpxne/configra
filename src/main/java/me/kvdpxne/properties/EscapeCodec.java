@@ -34,16 +34,19 @@ final class EscapeCodec {
         case 'u' -> {
           if (i + 4 >= length) {
             throw new PropertyParseException(
-              "Truncated \\u escape", null, -1,
-              value.substring(Math.max(0, i - 1)));
+              "Truncated \\u escape",
+              null, -1, value.substring(Math.max(0, i - 1)));
           }
           int code = 0;
           for (int j = 1; j <= 4; j++) {
-            final int digit = Character.digit(value.charAt(i + j), 16);
+            final int digit = Character.digit(
+              value.charAt(i + j), 16);
             if (-1 == digit) {
               throw new PropertyParseException(
-                "Invalid \\u escape", null, -1,
-                value.substring(i - 1, Math.min(length, i + 5)));
+                "Invalid \\u escape",
+                null, -1,
+                value.substring(i - 1,
+                  Math.min(length, i + 5)));
             }
             code = (code << 4) | digit;
           }
@@ -51,11 +54,11 @@ final class EscapeCodec {
           i += 4;
         }
         case 'x' -> {
-          // Variable-width hex escape: 1..4 digits. Optional leading 0x-style.
           int code = 0;
           int read = 0;
           while (read < 4 && i + 1 + read < length) {
-            final int digit = Character.digit(value.charAt(i + 1 + read), 16);
+            final int digit = Character.digit(
+              value.charAt(i + 1 + read), 16);
             if (-1 == digit) {
               break;
             }
@@ -64,8 +67,8 @@ final class EscapeCodec {
           }
           if (0 == read) {
             throw new PropertyParseException(
-              "Empty \\x escape", null, -1,
-              value.substring(Math.max(0, i - 1)));
+              "Empty \\x escape",
+              null, -1, value.substring(Math.max(0, i - 1)));
           }
           out.append((char) code);
           i += read;
@@ -78,10 +81,11 @@ final class EscapeCodec {
 
   // ----- Encoding -----
 
-  static String escapeKey(final String key) {
-    return escapeKey(key, false);
-  }
-
+  /**
+   * Escapes a key. Whitespace, {@code =}, {@code :}, {@code #}, {@code !}
+   * and any non-ASCII character (when {@code escapeNonAscii} is set) are
+   * escaped. Returns the original string when no escaping is needed.
+   */
   static String escapeKey(final String key, final boolean escapeNonAscii) {
     Objects.requireNonNull(key, "key");
     if (!needsEscaping(key, escapeNonAscii, true)) {
@@ -107,10 +111,11 @@ final class EscapeCodec {
     return out.toString();
   }
 
-  static String escapeValue(final String value) {
-    return escapeValue(value, false);
-  }
-
+  /**
+   * Escapes a value. Only the leading space and, when {@code
+   * escapeNonAscii} is set, any non-ASCII character are escaped. Returns
+   * the original string when no escaping is needed.
+   */
   static String escapeValue(final String value, final boolean escapeNonAscii) {
     Objects.requireNonNull(value, "value");
     if (!needsEscaping(value, escapeNonAscii, false)) {

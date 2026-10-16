@@ -16,7 +16,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -37,33 +36,40 @@ import java.util.stream.Stream;
 import me.kvdpxne.properties.exceptions.PropertyConcurrencyException;
 import me.kvdpxne.properties.exceptions.PropertyInterpolationException;
 import me.kvdpxne.properties.exceptions.PropertyMissingException;
+import me.kvdpxne.properties.exceptions.PropertyTypeException;
 import me.kvdpxne.properties.exceptions.PropertyWriteException;
 
 /**
- * Immutable, format-agnostic representation of a config file. Supports
- * {@code .properties} and {@code .ini} syntaxes via {@link ConfigFormat}.
+ * Immutable, format-agnostic representation of a config file.
  *
  * <h2>Compatibility notes</h2>
  * <ul>
- *   <li><b>Encoding.</b> UTF-8 with ISO-8859-1 fallback for {@code load}.
- *       Streaming APIs use lenient UTF-8.</li>
+ *   <li><b>Encoding.</b> UTF-8 with ISO-8859-1 fallback on malformed bytes.
+ *       A leading UTF-8 BOM ({@code EF BB BF}) is stripped automatically.</li>
  *   <li><b>Line terminators.</b> {@code \r\n}, {@code \r} and {@code \n}
  *       all accepted.</li>
  *   <li><b>Trailing whitespace.</b> Preserved by default; opt in with
  *       {@link ParseOptions#trimTrailing()}.</li>
  *   <li><b>Delimiter whitespace.</b> Strict by default.</li>
  *   <li><b>Trailing backslash at EOF.</b> Literal character.</li>
- *   <li><b>{@code \uHHHH} and {@code \xHHHH} escapes.</b> Malformed hex
+ *   <li><b>{@code \\uHHHH} and {@code \xHHHH} escapes.</b> Malformed hex
  *       raises {@link me.kvdpxne.properties.exceptions.PropertyParseException}.</li>
  *   <li><b>Atomic save.</b> Default writes to a sibling temp file and
  *       atomically moves into place.</li>
  * </ul>
  *
+ * <h2>Equality</h2>
+ * <p>{@link #equals(Object)} compares the <i>value map</i> only: two files
+ * with identical key-value pairs are equal regardless of comments or layout.
+ * {@link #contentEquals(Object)} compares the full node graph, including
+ * comments, blank lines, section order and disabled nodes. Both have
+ * matching hash-code companions.</p>
+ *
  * <h2>Disabled properties</h2>
  * <p>{@link #disable} replaces an active key with a
- * {@link DisabledPropertyNode} that preserves the original value and
- * comment marker. {@link #enable} restores it. Disabled keys are excluded
- * from {@link #find} and {@link #require}, but remain visible through
+ * {@link DisabledPropertyNode} preserving the original value and comment
+ * marker. {@link #enable} restores it. Disabled keys are excluded from
+ * {@link #find} and {@link #require}, but visible through
  * {@link #disabledKeys}.</p>
  *
  * <h2>Threading</h2>
@@ -109,11 +115,58 @@ public final class ConfigFile implements PropertySource {
         }
         indexed.put(key, property.value());
       }
-      // DisabledPropertyNode is intentionally excluded from the value
-      // map so find/require never see disabled keys.
     }
     this.values = Collections.unmodifiableMap(indexed);
     this.source = source;
+  }
+
+  // ----- Factories (empty/of) -----
+
+  /**
+   * Returns an empty instance with no nodes. Useful as a starting point
+   * for programmatic construction or as a null-object in tests.
+   */
+  public static ConfigFile empty(final ConfigFormat format) {
+    Objects.requireNonNull(format, "format");
+    return new ConfigFile(List.of(), null, format,
+      defaultParseOptions(format));
+  }
+
+  /**
+   * Returns a new instance whose node graph reflects {@code values} in
+   * iteration order. For INI, dotted keys are split into section and
+   * local name ({@code server.port} → section {@code server}, key
+   * {@code port}). For properties, keys are stored verbatim.
+   *
+   * <p>Comments and section ordering from any hypothetical source file
+   * are not preserved — the node graph is built fresh.</p>
+   */
+  public static ConfigFile of(final Map<String, String> values,
+                              final ConfigFormat format) {
+    Objects.requireNonNull(values, "values");
+    Objects.requireNonNull(format, "format");
+    if (values.isEmpty()) {
+      return empty(format);
+    }
+    final boolean ini = ConfigFormat.INI == format;
+    final List<Node> nodes = new ArrayList<>(values.size());
+    for (final Map.Entry<String, String> entry : values.entrySet()) {
+      final String key = Objects.requireNonNull(entry.getKey(), "key");
+      final String value = Objects.requireNonNull(entry.getValue(), "value");
+      if (ini) {
+        final int dot = key.lastIndexOf('.');
+        if (0 < dot) {
+          nodes.add(new PropertyNode(
+            key.substring(0, dot),
+            key.substring(dot + 1),
+            value));
+          continue;
+        }
+      }
+      nodes.add(new PropertyNode(null, key, value));
+    }
+    return new ConfigFile(nodes, null, format,
+      defaultParseOptions(format));
   }
 
   // ----- Loading -----
@@ -157,9 +210,10 @@ public final class ConfigFile implements PropertySource {
       throw new IOException("Not a regular file: " + source);
     }
     final byte[] bytes = Files.readAllBytes(source);
+    final int offset = hasUtf8Bom(bytes) ? 3 : 0;
     final String text = StandardCharsets.UTF_8.equals(charset)
       ? decodeLenient(bytes)
-      : new String(bytes, charset);
+      : new String(bytes, offset, bytes.length - offset, charset);
     return new ConfigFile(
       format.parse(text, options), source, format, options);
   }
@@ -240,17 +294,28 @@ public final class ConfigFile implements PropertySource {
       : ParseOptions.defaults();
   }
 
-  // ----- Lenient decoding -----
+  // ----- Lenient decoding (BOM-aware) -----
 
   private static String decodeLenient(final byte[] bytes) {
+    final int offset = hasUtf8Bom(bytes) ? 3 : 0;
+    final int length = bytes.length - offset;
     try {
       final CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
         .onMalformedInput(CodingErrorAction.REPORT)
         .onUnmappableCharacter(CodingErrorAction.REPORT);
-      return decoder.decode(ByteBuffer.wrap(bytes)).toString();
+      return decoder.decode(ByteBuffer.wrap(bytes, offset, length))
+        .toString();
     } catch (final CharacterCodingException ignored) {
-      return new String(bytes, StandardCharsets.ISO_8859_1);
+      return new String(bytes, offset, length,
+        StandardCharsets.ISO_8859_1);
     }
+  }
+
+  private static boolean hasUtf8Bom(final byte[] bytes) {
+    return 3 <= bytes.length
+      && (byte) 0xEF == bytes[0]
+      && (byte) 0xBB == bytes[1]
+      && (byte) 0xBF == bytes[2];
   }
 
   private static Reader newLenientUtf8Reader(final Path source)
@@ -306,7 +371,7 @@ public final class ConfigFile implements PropertySource {
   }
 
   public CompletableFuture<ConfigFile> saveAsync(final Path target) {
-    return this.saveAsync(target, WriteOptions.utf8(),
+    return this.saveAsync(target, this.defaultWriteOptions(),
       AsyncSupport.VIRTUAL_EXECUTOR);
   }
 
@@ -397,46 +462,6 @@ public final class ConfigFile implements PropertySource {
     }
     try (Reader reader = newLenientUtf8Reader(source)) {
       return format.peek(reader, key, options);
-    }
-  }
-
-  // W ConfigFile — nowe metody statyczne.
-
-  /**
-   * Reads several keys in a single pass. Use this instead of calling
-   * {@link #peek(Path, String)} in a loop — the number of file reads is one,
-   * regardless of how many keys are requested.
-   */
-  public static Map<String, String> peekAll(final Path source,
-                                            final Collection<String> keys)
-    throws IOException {
-    Objects.requireNonNull(source, "source");
-    final ConfigFormat format = ConfigFormat.fromFileName(
-      source.getFileName().toString());
-    return peekAll(source, format, keys, defaultParseOptions(format));
-  }
-
-  public static Map<String, String> peekAll(final Path source,
-                                            final ConfigFormat format,
-                                            final Collection<String> keys)
-    throws IOException {
-    return peekAll(source, format, keys, defaultParseOptions(format));
-  }
-
-  public static Map<String, String> peekAll(final Path source,
-                                            final ConfigFormat format,
-                                            final Collection<String> keys,
-                                            final ParseOptions options)
-    throws IOException {
-    Objects.requireNonNull(source, "source");
-    Objects.requireNonNull(format, "format");
-    Objects.requireNonNull(keys, "keys");
-    Objects.requireNonNull(options, "options");
-    if (!Files.isRegularFile(source)) {
-      return Map.of();
-    }
-    try (Reader reader = newLenientUtf8Reader(source)) {
-      return format.peekAll(reader, keys, options);
     }
   }
 
@@ -632,14 +657,6 @@ public final class ConfigFile implements PropertySource {
 
   // ----- Enable / disable -----
 
-  /**
-   * Comments out an active key, preserving its original value in place so
-   * {@link #enable(PropertyKey)} can restore it. If the key is not active
-   * or is already disabled, {@code this} is returned unchanged.
-   *
-   * <p>The comment marker used is the format's primary marker: {@code '#'}
-   * for {@code .properties}, {@code ';'} for INI.</p>
-   */
   public <T> ConfigFile disable(final PropertyKey<T> key) {
     Objects.requireNonNull(key, "key");
     return this.disableInternal(key.name());
@@ -673,11 +690,6 @@ public final class ConfigFile implements PropertySource {
       : this;
   }
 
-  /**
-   * Restores a key previously disabled by {@link #disable}. If the key is
-   * not present as a {@link DisabledPropertyNode}, {@code this} is
-   * returned unchanged.
-   */
   public <T> ConfigFile enable(final PropertyKey<T> key) {
     Objects.requireNonNull(key, "key");
     return this.enableInternal(key.name());
@@ -708,9 +720,6 @@ public final class ConfigFile implements PropertySource {
       : this;
   }
 
-  /**
-   * Returns the qualified keys of all disabled pairs, in file order.
-   */
   public Set<String> disabledKeys() {
     final Set<String> result = new LinkedHashSet<>();
     for (final Node node : this.nodes) {
@@ -744,15 +753,27 @@ public final class ConfigFile implements PropertySource {
   }
 
   /**
-   * Returns the comment marker that {@link #disable} should emit. Chosen
-   * by format so it matches the file's prevailing convention.
+   * Comment marker used when disabling a key. Sourced from
+   * {@link ParseOptions#commentChars()} so a file parsed with {@code !}
+   * comments keeps {@code !} on disable, and a file parsed with the
+   * default {@code #} keeps {@code #}.
    */
   private char writeMarker() {
-    return ConfigFormat.INI == this.format ? ';' : '#';
+    return this.parseOptions.commentChars().primary();
   }
 
   // ----- Batch mutation -----
 
+  /**
+   * Applies every entry in {@code updates} in a single pass over the node
+   * list. Values are type-checked against {@link PropertyCodec#valueType()}
+   * before encoding; a mismatch raises
+   * {@link PropertyTypeException} immediately, rather than deferring the
+   * failure to the next {@link #require}.
+   *
+   * <p>Semantics match {@link #with(PropertyKey, Object)}: the first
+   * occurrence of a key is replaced; later duplicates are dropped.</p>
+   */
   public ConfigFile withAll(final Map<PropertyKey<?>, ?> updates) {
     Objects.requireNonNull(updates, "updates");
     if (updates.isEmpty()) {
@@ -764,10 +785,32 @@ public final class ConfigFile implements PropertySource {
         entry.getKey(), "key");
       final Object value = Objects.requireNonNull(
         entry.getValue(), "value");
-      encoded.put(this.lookupKey(key.name()),
-        encodeUntyped(key, value));
+      validateValueType(key, value);
+      encoded.put(this.lookupKey(key.name()), encodeUntyped(key, value));
     }
     return this.withAllRaw(encoded);
+  }
+
+  /**
+   * Validates the runtime type of {@code value} against the codec's
+   * declared {@link PropertyCodec#valueType()}. Codecs whose
+   * {@code valueType()} is {@code Object.class} opt out of the check.
+   */
+  private static void validateValueType(final PropertyKey<?> key,
+                                        final Object value) {
+    final Class<?> expected = key.codec().valueType();
+    if (Object.class == expected) {
+      return;
+    }
+    if (!expected.isInstance(value)) {
+      throw new PropertyTypeException(
+        key.name(),
+        String.valueOf(value),
+        "Value of type " + value.getClass().getName()
+          + " is not assignable to " + expected.getName()
+          + " for key '" + key.name() + '\'',
+        null);
+    }
   }
 
   private ConfigFile withAllRaw(final Map<String, String> encoded) {
@@ -822,18 +865,37 @@ public final class ConfigFile implements PropertySource {
   }
 
   public ConfigFile withInterpolation() {
-    final Map<String, String> resolved = new LinkedHashMap<>();
-    final Set<String> visiting = new HashSet<>();
-    for (final String key : this.values.keySet()) {
-      this.resolveValue(key, resolved, visiting);
+    // Build combined source map: active values and disabled values. The
+    // active value takes precedence when both exist for the same key.
+    final Map<String, String> combined = new LinkedHashMap<>(this.values);
+    for (final Node node : this.nodes) {
+      if (node instanceof DisabledPropertyNode disabled) {
+        combined.putIfAbsent(
+          this.lookupKey(disabled.qualifiedKey()),
+          disabled.value());
+      }
     }
+    // Resolve interpolation against the combined map.
+    final Map<String, String> resolved =
+      new LinkedHashMap<>(combined.size());
+    final Set<String> visiting = new HashSet<>();
+    for (final String key : combined.keySet()) {
+      this.resolveValueIn(key, combined, resolved, visiting);
+    }
+    // Apply to both active and disabled nodes.
     final List<Node> updated = new ArrayList<>(this.nodes.size());
     for (final Node node : this.nodes) {
       if (node instanceof PropertyNode property) {
+        final String key = this.lookupKey(property.qualifiedKey());
         updated.add(new PropertyNode(property.section(),
-          property.key(),
-          resolved.get(this.lookupKey(
-            property.qualifiedKey()))));
+          property.key(), resolved.get(key)));
+      } else if (node instanceof DisabledPropertyNode disabled) {
+        final String key = this.lookupKey(disabled.qualifiedKey());
+        updated.add(new DisabledPropertyNode(
+          disabled.section(), disabled.key(),
+          resolved.get(key),
+          disabled.commentPrefix(),
+          disabled.spaceAfterPrefix()));
       } else {
         updated.add(node);
       }
@@ -943,8 +1005,14 @@ public final class ConfigFile implements PropertySource {
     return load(this.source, this.format, this.parseOptions);
   }
 
-  // ----- Object -----
+  // ----- Equality -----
 
+  /**
+   * Value-map equality. Two instances are equal when their key-value
+   * pairs match exactly. Comments, blank lines, section order and
+   * disabled nodes are <b>not</b> part of this contract — use
+   * {@link #contentEquals(Object)} for full-graph comparison.
+   */
   @Override
   public boolean equals(final Object other) {
     if (this == other) {
@@ -959,6 +1027,29 @@ public final class ConfigFile implements PropertySource {
   @Override
   public int hashCode() {
     return this.values.hashCode();
+  }
+
+  /**
+   * Full node-graph equality: comments, blank lines, section order and
+   * disabled nodes must match. Use this when byte-for-byte layout
+   * equivalence is required (e.g. round-trip verification).
+   */
+  public boolean contentEquals(final Object other) {
+    if (this == other) {
+      return true;
+    }
+    if (!(other instanceof ConfigFile that)) {
+      return false;
+    }
+    return this.nodes.equals(that.nodes);
+  }
+
+  /**
+   * Hash code consistent with {@link #contentEquals(Object)}. Distinct
+   * from {@link #hashCode()}, which is derived from the value map only.
+   */
+  public int contentHashCode() {
+    return this.nodes.hashCode();
   }
 
   @Override
@@ -1071,9 +1162,15 @@ public final class ConfigFile implements PropertySource {
       : this;
   }
 
-  private String resolveValue(final String key,
-                              final Map<String, String> resolved,
-                              final Set<String> visiting) {
+  /**
+   * Interpolation resolver against an arbitrary source map. Used by
+   * {@link #withInterpolation()} to handle both active and disabled
+   * values uniformly.
+   */
+  private String resolveValueIn(final String key,
+                                final Map<String, String> source,
+                                final Map<String, String> resolved,
+                                final Set<String> visiting) {
     final String cached = resolved.get(key);
     if (null != cached) {
       return cached;
@@ -1083,7 +1180,7 @@ public final class ConfigFile implements PropertySource {
         key, key,
         "Circular interpolation reference: " + key);
     }
-    final String raw = this.values.get(key);
+    final String raw = source.get(key);
     if (null == raw) {
       throw new PropertyInterpolationException(
         key, key,
@@ -1099,15 +1196,14 @@ public final class ConfigFile implements PropertySource {
     int last = 0;
     while (matcher.find()) {
       out.append(raw, last, matcher.start());
-      final String refName = this.lookupKey(
-        matcher.group(1).trim());
-      if (!this.values.containsKey(refName)) {
+      final String refName = this.lookupKey(matcher.group(1).trim());
+      if (!source.containsKey(refName)) {
         throw new PropertyInterpolationException(
           key, refName,
           "Missing property '" + refName
             + "' referenced from '" + key + '\'');
       }
-      out.append(this.resolveValue(refName, resolved, visiting));
+      out.append(this.resolveValueIn(refName, source, resolved, visiting));
       last = matcher.end();
     }
     out.append(raw, last, raw.length());
