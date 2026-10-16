@@ -21,52 +21,28 @@ import me.kvd.properties.core.ConfigFile;
 import me.kvd.properties.diff.ConfigDiff;
 import me.kvd.properties.options.ParseOptions;
 import me.kvd.properties.spi.ConfigFormat;
+import me.kvd.properties.util.AsyncSupport;
 
 /**
- * Watches a config file and invokes a callback whenever its content has
- * changed.
- *
- * <h2>Modes</h2>
- * <ul>
- *   <li>{@link WatchMode#POLLING} — checks {@code Files.getLastModifiedTime}
- *       at a fixed interval (default 500&nbsp;ms). Predictable, works on
- *       every filesystem including NFS, never misses a change that alters
- *       mtime. This is the default.</li>
- *   <li>{@link WatchMode#EVENT_DRIVEN} — uses the OS-native
- *       {@link WatchService}. Lower idle CPU, but may miss events under
- *       buffer overflow (Windows) and is not supported on every filesystem
- *       (NFS, some FUSE mounts).</li>
- * </ul>
- *
- * <p>When {@code format} and {@code parseOptions} are omitted, the file is
- * loaded via {@link ConfigFile#load(Path)}, which selects the format from
- * the file extension and applies format-appropriate parse options
- * ({@link ParseOptions#iniDefaults()} for {@code .ini}).</p>
- *
- * <p>The callback runs on an internal daemon thread. Callers that touch
- * thread-unsafe state should marshal the work onto their own executor.</p>
+ * Watches a config file and invokes a callback whenever its content changes.
+ * Callbacks run on an internal daemon thread.
  */
 public final class PropertiesWatcher implements AutoCloseable {
 
   static final String THREAD_PREFIX = "config-watcher-";
 
+  static {
+    AsyncSupport.registerInternalPrefix(THREAD_PREFIX);
+  }
+
   private static final long POLL_INTERVAL_MS = 500L;
   private static final Consumer<IOException> SILENT_ERROR_HANDLER =
     ignored -> {
-      // Silent by default; callers supply a handler when they care.
+      // Silent by default.
     };
 
-  /**
-   * Selects the underlying change-detection mechanism.
-   */
   public enum WatchMode {
-    /**
-     * Poll {@code Files.getLastModifiedTime} at a fixed interval.
-     */
     POLLING,
-    /**
-     * Use the OS-native {@link WatchService}.
-     */
     EVENT_DRIVEN
   }
 
@@ -78,11 +54,9 @@ public final class PropertiesWatcher implements AutoCloseable {
   private final Consumer<ConfigFile> onChange;
   private final Consumer<IOException> onError;
 
-  // Polling state.
   private final ScheduledExecutorService scheduler;
   private final AtomicLong lastModified = new AtomicLong();
 
-  // Event-driven state.
   private final WatchService watchService;
   private final Thread eventThread;
 
@@ -105,12 +79,33 @@ public final class PropertiesWatcher implements AutoCloseable {
     this.onError = onError;
 
     if (WatchMode.EVENT_DRIVEN == mode) {
-      this.watchService = FileSystems.getDefault().newWatchService();
+      final WatchService service = FileSystems.getDefault().newWatchService();
+      boolean registered = false;
+      try {
+        final Path dir = source.toAbsolutePath().getParent();
+        if (null == dir) {
+          throw new IOException(
+            "Cannot resolve parent directory for " + source);
+        }
+        dir.register(service,
+          StandardWatchEventKinds.ENTRY_MODIFY,
+          StandardWatchEventKinds.ENTRY_CREATE,
+          StandardWatchEventKinds.ENTRY_DELETE);
+        registered = true;
+      } finally {
+        if (!registered) {
+          try {
+            service.close();
+          } catch (final IOException ignored) {
+            // Best-effort cleanup.
+          }
+        }
+      }
+      this.watchService = service;
       this.scheduler = null;
       this.eventThread = new Thread(this::eventLoop,
         THREAD_PREFIX + source.getFileName());
       this.eventThread.setDaemon(true);
-      this.registerDirectory();
     } else {
       this.watchService = null;
       this.scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -124,7 +119,7 @@ public final class PropertiesWatcher implements AutoCloseable {
     }
   }
 
-  // ----- Public factories: default (POLLING, auto-detect) -----
+  // ----- Factories: default (POLLING) -----
 
   public static PropertiesWatcher watch(final Path source,
                                         final Consumer<ConfigFile> onChange)
@@ -139,8 +134,6 @@ public final class PropertiesWatcher implements AutoCloseable {
     throws IOException {
     return watch(source, WatchMode.POLLING, null, null, onChange, onError);
   }
-
-  // ----- Public factories: explicit mode -----
 
   public static PropertiesWatcher watch(final Path source,
                                         final WatchMode mode,
@@ -191,17 +184,43 @@ public final class PropertiesWatcher implements AutoCloseable {
   public static PropertiesWatcher watchDiff(final Path source,
                                             final Consumer<ConfigDiff> onChange)
     throws IOException {
-    return watchDiff(source, WatchMode.POLLING, null, null, onChange);
+    return watchDiff(source, WatchMode.POLLING, null, null,
+      onChange, SILENT_ERROR_HANDLER);
+  }
+
+  public static PropertiesWatcher watchDiff(final Path source,
+                                            final WatchMode mode,
+                                            final Consumer<ConfigDiff> onChange)
+    throws IOException {
+    return watchDiff(source, mode, null, null,
+      onChange, SILENT_ERROR_HANDLER);
+  }
+
+  public static PropertiesWatcher watchDiff(final Path source,
+                                            final Consumer<ConfigDiff> onChange,
+                                            final Consumer<IOException> onError)
+    throws IOException {
+    return watchDiff(source, WatchMode.POLLING, null, null, onChange, onError);
+  }
+
+  public static PropertiesWatcher watchDiff(final Path source,
+                                            final WatchMode mode,
+                                            final Consumer<ConfigDiff> onChange,
+                                            final Consumer<IOException> onError)
+    throws IOException {
+    return watchDiff(source, mode, null, null, onChange, onError);
   }
 
   public static PropertiesWatcher watchDiff(final Path source,
                                             final WatchMode mode,
                                             final ConfigFormat format,
                                             final ParseOptions parseOptions,
-                                            final Consumer<ConfigDiff> onChange)
+                                            final Consumer<ConfigDiff> onChange,
+                                            final Consumer<IOException> onError)
     throws IOException {
     Objects.requireNonNull(source, "source");
     Objects.requireNonNull(onChange, "onChange");
+    Objects.requireNonNull(onError, "onError");
     final AtomicReference<ConfigFile> previous = new AtomicReference<>(
       loadInitial(source, format, parseOptions));
     return watch(source, mode, format, parseOptions, updated -> {
@@ -213,14 +232,10 @@ public final class PropertiesWatcher implements AutoCloseable {
       if (!diff.isEmpty()) {
         onChange.accept(diff);
       }
-    }, SILENT_ERROR_HANDLER);
+    }, onError);
   }
 
-  // ----- Startup (internal) -----
-
-  // (constructor already initialises the backend; nothing to do here)
-
-  // ----- Loading helpers -----
+  // ----- Internal -----
 
   private static ConfigFile loadInitial(final Path source,
                                         final ConfigFormat format,
@@ -237,8 +252,6 @@ public final class PropertiesWatcher implements AutoCloseable {
       : ConfigFile.load(this.source, this.format, this.parseOptions);
   }
 
-  // ----- Polling implementation -----
-
   private long readModificationTime() {
     try {
       return Files.getLastModifiedTime(this.source).toMillis();
@@ -247,12 +260,16 @@ public final class PropertiesWatcher implements AutoCloseable {
     }
   }
 
-  private void startPolling() {
-    this.scheduler.scheduleWithFixedDelay(
-      this::pollTick,
-      this.pollIntervalMs,
-      this.pollIntervalMs,
-      TimeUnit.MILLISECONDS);
+  private void start() {
+    if (WatchMode.EVENT_DRIVEN == this.mode) {
+      this.eventThread.start();
+    } else {
+      this.scheduler.scheduleWithFixedDelay(
+        this::pollTick,
+        this.pollIntervalMs,
+        this.pollIntervalMs,
+        TimeUnit.MILLISECONDS);
+    }
   }
 
   private void pollTick() {
@@ -274,20 +291,6 @@ public final class PropertiesWatcher implements AutoCloseable {
     }
   }
 
-  // ----- Event-driven implementation -----
-
-  private void registerDirectory() throws IOException {
-    final Path dir = this.source.toAbsolutePath().getParent();
-    if (null == dir) {
-      throw new IOException(
-        "Cannot resolve parent directory for " + this.source);
-    }
-    dir.register(this.watchService,
-      StandardWatchEventKinds.ENTRY_MODIFY,
-      StandardWatchEventKinds.ENTRY_CREATE,
-      StandardWatchEventKinds.ENTRY_DELETE);
-  }
-
   private void eventLoop() {
     final Path fileName = this.source.getFileName();
     while (!this.closed.get()) {
@@ -307,7 +310,6 @@ public final class PropertiesWatcher implements AutoCloseable {
       try {
         for (final WatchEvent<?> event : key.pollEvents()) {
           if (StandardWatchEventKinds.OVERFLOW == event.kind()) {
-            // Lost events; treat as a change to be safe.
             relevant = true;
             continue;
           }
@@ -320,7 +322,6 @@ public final class PropertiesWatcher implements AutoCloseable {
       } finally {
         final boolean valid = key.reset();
         if (!valid) {
-          // Directory deleted or inaccessible; stop watching.
           return;
         }
       }
@@ -336,23 +337,6 @@ public final class PropertiesWatcher implements AutoCloseable {
     }
   }
 
-  private void startEventDriven() {
-    this.eventThread.start();
-  }
-
-  // ----- Lifecycle -----
-
-  /**
-   * Starts the watcher. Called automatically by the factory methods.
-   */
-  void start() {
-    if (WatchMode.EVENT_DRIVEN == this.mode) {
-      this.startEventDriven();
-    } else {
-      this.startPolling();
-    }
-  }
-
   @Override
   public void close() {
     if (!this.closed.compareAndSet(false, true)) {
@@ -365,7 +349,7 @@ public final class PropertiesWatcher implements AutoCloseable {
       try {
         this.watchService.close();
       } catch (final IOException ignored) {
-        // Closing a watch service is best-effort.
+        // Best-effort cleanup.
       }
     }
     if (null != this.eventThread) {

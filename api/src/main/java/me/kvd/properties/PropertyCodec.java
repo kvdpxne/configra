@@ -13,14 +13,6 @@ import me.kvd.properties.exceptions.PropertiesException;
 
 /**
  * Bidirectional converter between a raw string and a strongly typed value.
- *
- * <p>Stateless codecs are exposed as constants. {@link #enumeration(Class)}
- * caches its result per {@code Class}, so repeated calls with the same enum
- * type return the same instance — which keeps {@link PropertyKey} equality
- * (and therefore the per-instance decode cache in
- * {@link ConfigFile}) working as intended.</p>
- *
- * @param <T> the target type
  */
 public interface PropertyCodec<T> {
 
@@ -28,12 +20,6 @@ public interface PropertyCodec<T> {
 
   String encode(T value) throws PropertiesException;
 
-  /**
-   * Returns the runtime type this codec produces. Used by batch mutation
-   * operations to reject mismatched values at insertion time. Defaults to
-   * {@link Object#getClass() Object.class}, which disables the check —
-   * codecs built via {@link #of(Function, Function)} keep this default.
-   */
   default Class<?> valueType() {
     return Object.class;
   }
@@ -66,13 +52,10 @@ public interface PropertyCodec<T> {
     },
     Object::toString);
 
-  PropertyCodec<Path> PATH = of(Path.class,
-    Paths::get,
-    Path::toString);
+  PropertyCodec<Path> PATH = of(Path.class, Paths::get, Path::toString);
 
-  PropertyCodec<URI> URI = of(URI.class,
-    java.net.URI::create,
-    java.net.URI::toString);
+  PropertyCodec<URI> URI = of(java.net.URI.class,
+    java.net.URI::create, java.net.URI::toString);
 
   PropertyCodec<List<String>> STRING_LIST = of(List.class,
     PropertyCodec::decodeStringList,
@@ -92,28 +75,12 @@ public interface PropertyCodec<T> {
     return DURATION;
   }
 
-  /**
-   * Enum codec for {@code type}. The instance is cached in a
-   * {@link ClassValue}, so two keys built from the same enum class share
-   * the same codec instance — required for reliable {@code equals} on
-   * {@link PropertyKey} and for the decode cache.
-   */
   @SuppressWarnings("unchecked")
   static <E extends Enum<E>> PropertyCodec<E> enumeration(final Class<E> type) {
     Objects.requireNonNull(type, "type");
-    return (PropertyCodec<E>) ENUM_CODECS.get(type);
+    return (PropertyCodec<E>) Holders.ENUM_CODECS.get(type);
   }
 
-  /**
-   * Typed codec factory. The {@code type} argument is used to answer
-   * {@link #valueType()} so that batch operations can validate values at
-   * insertion time.
-   *
-   * <p>The parameter is {@code Class<?>} rather than {@code Class<T>} to
-   * allow raw class literals such as {@code List.class} or
-   * {@code Object.class} to be passed without casts. The value type
-   * {@code T} is inferred from the decoder and encoder functions.</p>
-   */
   static <T> PropertyCodec<T> of(final Class<?> type,
                                  final Function<String, T> decoder,
                                  final Function<T, String> encoder) {
@@ -142,8 +109,7 @@ public interface PropertyCodec<T> {
         } catch (final PropertiesException exception) {
           throw exception;
         } catch (final RuntimeException exception) {
-          throw new PropertiesException(
-            "Cannot encode value", exception);
+          throw new PropertiesException("Cannot encode value", exception);
         }
       }
 
@@ -154,57 +120,59 @@ public interface PropertyCodec<T> {
     };
   }
 
-  /**
-   * Untyped codec factory. {@link #valueType()} falls back to
-   * {@code Object.class}, so no type check runs during batch operations.
-   */
   static <T> PropertyCodec<T> of(final Function<String, T> decoder,
                                  final Function<T, String> encoder) {
     return of(Object.class, decoder, encoder);
   }
 
-  // ----- Enum codec cache -----
+  // ----- Private holders -----
 
   /**
-   * Per-{@code Class} cache of enum codecs. {@link ClassValue} is
-   * GC-friendly: entries are dropped automatically when the corresponding
-   * class is unloaded, and the lookup is a lock-free read on the hot path.
+   * Holds the enum codec cache. Kept in a nested class so its members are
+   * not exposed as part of the public interface surface.
    */
-  ClassValue<PropertyCodec<?>> ENUM_CODECS = new ClassValue<>() {
-    @Override
-    protected PropertyCodec<?> computeValue(final Class<?> type) {
-      return createEnumCodec(type);
-    }
-  };
+  final class Holders {
 
-  @SuppressWarnings({"unchecked", "rawtypes"})
-  static PropertyCodec<?> createEnumCodec(final Class<?> type) {
-    return new PropertyCodec() {
-
-      @Override
-      public Object decode(final String raw) throws PropertiesException {
-        Objects.requireNonNull(raw, "raw");
-        try {
-          return Enum.valueOf((Class<? extends Enum>) type,
-            raw.trim().toUpperCase(Locale.ROOT));
-        } catch (final IllegalArgumentException exception) {
-          throw new PropertiesException(
-            "Not a valid " + type.getSimpleName()
-              + ": " + raw, exception);
+    static final ClassValue<PropertyCodec<?>> ENUM_CODECS =
+      new ClassValue<>() {
+        @Override
+        protected PropertyCodec<?> computeValue(final Class<?> type) {
+          return createEnumCodec(type);
         }
-      }
+      };
 
-      @Override
-      public String encode(final Object value) throws PropertiesException {
-        Objects.requireNonNull(value, "value");
-        return ((Enum) value).name();
-      }
+    private Holders() {
+      throw new AssertionError("No instances.");
+    }
 
-      @Override
-      public Class<?> valueType() {
-        return type;
-      }
-    };
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static PropertyCodec<?> createEnumCodec(final Class<?> type) {
+      return new PropertyCodec() {
+        @Override
+        public Object decode(final String raw) throws PropertiesException {
+          Objects.requireNonNull(raw, "raw");
+          try {
+            return Enum.valueOf((Class<? extends Enum>) type,
+              raw.trim().toUpperCase(Locale.ROOT));
+          } catch (final IllegalArgumentException exception) {
+            throw new PropertiesException(
+              "Not a valid " + type.getSimpleName()
+                + ": " + raw, exception);
+          }
+        }
+
+        @Override
+        public String encode(final Object value) throws PropertiesException {
+          Objects.requireNonNull(value, "value");
+          return ((Enum) value).name();
+        }
+
+        @Override
+        public Class<?> valueType() {
+          return type;
+        }
+      };
+    }
   }
 
   // ----- Internal helpers -----
@@ -290,8 +258,7 @@ public interface PropertyCodec<T> {
         unit = String.valueOf(text.charAt(i));
         i++;
       } else {
-        throw new PropertiesException(
-          "Missing unit in duration: " + raw);
+        throw new PropertiesException("Missing unit in duration: " + raw);
       }
       millis += switch (unit) {
         case "ms" -> value;

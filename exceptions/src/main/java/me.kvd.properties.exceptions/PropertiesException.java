@@ -5,9 +5,11 @@ import java.io.Serial;
 /**
  * Root of the exception hierarchy raised by the library.
  *
- * <p>Sealed so that callers can pattern-match exhaustively over the
- * permitted subtypes. Every subtype carries enough context to identify the
- * failing key, line or operation without inspecting the stack trace.</p>
+ * <p><b>Extensibility.</b> The class is {@code sealed} so that pattern
+ * matching over permitted subtypes is exhaustive. Third-party code cannot
+ * declare new subtypes. If your integration needs a custom exception,
+ * declare one outside this hierarchy and wrap it, or attach it as the
+ * {@code cause} of one of the existing subtypes.</p>
  */
 public sealed class PropertiesException extends RuntimeException
   permits PropertyParseException,

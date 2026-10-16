@@ -3,4 +3,56 @@
   <component name="CompilerConfiguration">
     <bytecodeTargetLevel target="25" />
   </component>
+  <component name="JavacSettings">
+    <option name="ADDITIONAL_OPTIONS_OVERRIDE">
+      <module name="properties.api" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.api.main" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.api.test" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.core" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.core.main" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.core.test" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.escape" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.escape.main" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.escape.test" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.example" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.example.main" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.example.test" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.exceptions" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.exceptions.main" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.exceptions.test" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.extras" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.extras.diff" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.extras.diff.main" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.extras.diff.test" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.extras.io" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.extras.io.main" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.extras.io.test" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.extras.main" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.extras.test" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.extras.util" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.extras.util.main" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.extras.util.test" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.extras.watch" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.extras.watch.main" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.extras.watch.test" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.formats" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.formats.ini" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.formats.ini.main" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.formats.ini.test" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.formats.main" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.formats.properties" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.formats.properties.main" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.formats.properties.test" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.formats.test" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.options" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.options.main" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.options.test" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.schema" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.schema.main" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.schema.test" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.spi" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.spi.main" options="-Xlint:all -Xlint:-serial" />
+      <module name="properties.spi.test" options="-Xlint:all -Xlint:-serial" />
+    </option>
+  </component>
 </project>

@@ -94,6 +94,12 @@ public record PropertyKey<T>(
     return new PropertyKey<>(name, PropertyCodec.stringList(), List.of());
   }
 
+  public static PropertyKey<List<String>> stringList(final String name,
+                                                     final List<String> defaultValue) {
+    Objects.requireNonNull(defaultValue, "defaultValue");
+    return new PropertyKey<>(name, PropertyCodec.stringList(), defaultValue);
+  }
+
   public static PropertyKey<Path> path(final String name) {
     return new PropertyKey<>(name, PropertyCodec.PATH, null);
   }
@@ -126,5 +132,15 @@ public record PropertyKey<T>(
     Objects.requireNonNull(defaultValue, "defaultValue");
     return new PropertyKey<>(
       name, PropertyCodec.enumeration(type), defaultValue);
+  }
+
+  /**
+   * Returns a copy of this key with the given default value. Useful when the
+   * canonical declaration lives in one module and a consumer needs a variant
+   * with a different fallback.
+   */
+  public PropertyKey<T> withDefault(final T value) {
+    Objects.requireNonNull(value, "value");
+    return new PropertyKey<>(this.name, this.codec, value);
   }
 }

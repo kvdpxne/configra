@@ -43,3 +43,4 @@ include(
 
 rootProject.name = "properties"
 include("options")
+include("example")

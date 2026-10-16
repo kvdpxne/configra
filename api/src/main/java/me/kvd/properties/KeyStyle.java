@@ -134,7 +134,7 @@ public enum KeyStyle {
         start = i + 1;
         continue;
       }
-      // Lowercase or digit → uppercase boundary: "daySync" → "day|Sync"
+      // Lowercase/digit → uppercase boundary: "daySync" → "day|Sync"
       if (i > start
         && Character.isUpperCase(c)
         && (Character.isLowerCase(segment.charAt(i - 1))
@@ -171,7 +171,7 @@ public enum KeyStyle {
         final StringBuilder sb = new StringBuilder(words.size() * 8);
         for (int i = 0; i < words.size(); i++) {
           final String w = words.get(i);
-          if (0 == i) {
+          if (0 == i || Character.isDigit(w.charAt(0))) {
             sb.append(w);
           } else {
             sb.append(capitalize(w));

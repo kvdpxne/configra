@@ -8,6 +8,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -98,8 +99,13 @@ public interface ConfigFormat {
     Objects.requireNonNull(options, "options");
     return write(nodes);
   }
-
+  /**
+   * Stable, lower-case identifier of this format ({@code "properties"},
+   * {@code "ini"}, ...). Used by {@code ConfigFormats#isIni} and any other
+   * format-family checks. Defaults to the simple class name for third-party
+   * implementations that do not override it.
+   */
   default String name() {
-    return this.getClass().getSimpleName();
+    return this.getClass().getSimpleName().toLowerCase(Locale.ROOT);
   }
 }

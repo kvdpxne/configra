@@ -37,6 +37,7 @@ import me.kvd.properties.spi.node.DisabledPropertyNode;
 import me.kvd.properties.spi.node.Node;
 import me.kvd.properties.spi.node.PropertyNode;
 import me.kvd.properties.util.AsyncSupport;
+import me.kvd.properties.util.Charsets;
 
 /**
  * Immutable, format-agnostic representation of a config file.
@@ -45,7 +46,7 @@ import me.kvd.properties.util.AsyncSupport;
  * <p>This class owns the parsed node graph and the value index. It exposes
  * typed access, immutable mutation and equality, and delegates I/O to
  * {@link ConfigFileIO}, interpolation to {@link ConfigInterpolation}, and
- * charset handling to {@link ConfigCharsets}.</p>
+ * charset handling to {@link Charsets}.</p>
  *
  * <h2>Equality</h2>
  * <p>{@link #equals(Object)} compares the value map only; {@link
@@ -56,6 +57,8 @@ import me.kvd.properties.util.AsyncSupport;
  * per-instance cache holds decoded values, populated lazily.</p>
  */
 public final class ConfigFile implements PropertySource {
+
+  private static final Object NULL_SENTINEL = new Object();
 
   private final List<Node> nodes;
   private final Map<String, String> values;
@@ -107,7 +110,9 @@ public final class ConfigFile implements PropertySource {
 
   // ----- Factories -----
 
-  /** Returns an empty instance with no nodes. */
+  /**
+   * Returns an empty instance with no nodes.
+   */
   public static ConfigFile empty(final ConfigFormat format) {
     Objects.requireNonNull(format, "format");
     return new ConfigFile(List.of(), null, format,
@@ -132,9 +137,10 @@ public final class ConfigFile implements PropertySource {
     for (final Map.Entry<String, String> entry : values.entrySet()) {
       final String key = Objects.requireNonNull(entry.getKey(), "key");
       final String value = Objects.requireNonNull(entry.getValue(), "value");
+      validateKey(key);
       if (ini) {
         final int dot = key.lastIndexOf('.');
-        if (0 < dot) {
+        if (0 < dot && dot < key.length() - 1) {
           nodes.add(new PropertyNode(
             key.substring(0, dot),
             key.substring(dot + 1),
@@ -146,6 +152,22 @@ public final class ConfigFile implements PropertySource {
     }
     return new ConfigFile(nodes, null, format,
       ConfigFileIO.defaultParseOptions(format));
+  }
+
+  private static void validateKey(final String key) {
+    if (key.isEmpty()) {
+      throw new IllegalArgumentException("Key must not be empty");
+    }
+    if (!key.equals(key.strip())) {
+      throw new IllegalArgumentException(
+        "Key must not have leading or trailing whitespace: '" + key + '\'');
+    }
+    for (int i = 0; i < key.length(); i++) {
+      if (Character.isISOControl(key.charAt(i))) {
+        throw new IllegalArgumentException(
+          "Key must not contain ISO control characters: '" + key + '\'');
+      }
+    }
   }
 
   // ----- Static delegation to ConfigFileIO -----
@@ -292,14 +314,13 @@ public final class ConfigFile implements PropertySource {
     return this.caseInsensitiveLookup ? key.toLowerCase(Locale.ROOT) : key;
   }
 
-  // ----- Typed access -----
-
+  // find() używa teraz własnego pola:
   @SuppressWarnings("unchecked")
   public <T> Optional<T> find(final PropertyKey<T> key) {
     Objects.requireNonNull(key, "key");
     final Object cached = this.decodeCache.get(key);
     if (null != cached) {
-      return cached == ConfigFileIO.NULL_SENTINEL
+      return cached == NULL_SENTINEL
         ? Optional.empty()
         : Optional.of((T) cached);
     }
@@ -307,8 +328,7 @@ public final class ConfigFile implements PropertySource {
     if (null == raw) {
       final T defaultValue = key.defaultValue();
       this.decodeCache.putIfAbsent(key,
-        null == defaultValue ? ConfigFileIO.NULL_SENTINEL
-          : defaultValue);
+        null == defaultValue ? NULL_SENTINEL : defaultValue);
       return Optional.ofNullable(defaultValue);
     }
     final T decoded = key.codec().decode(raw);
@@ -409,7 +429,8 @@ public final class ConfigFile implements PropertySource {
 
   public ConfigDiff diff(final ConfigFile other) {
     Objects.requireNonNull(other, "other");
-    return ConfigDiff.of(this.values, other.values);
+    return ConfigDiff.of(this.values, other.values,
+      this.disabledKeys(), other.disabledKeys());
   }
 
   // ----- Immutable mutation via PropertyKey -----
@@ -497,6 +518,17 @@ public final class ConfigFile implements PropertySource {
 
   // ----- Batch mutation -----
 
+  /**
+   * ...
+   *
+   * <p><b>Type checking.</b> Values are validated against
+   * {@link PropertyCodec#valueType()} only when the codec declares a
+   * concrete type. Codecs built via {@link PropertyCodec#of(Function, Function)}
+   * declare {@code Object.class} and opt out of the check — passing a value
+   * of the wrong runtime type will fail during encoding or at the next
+   * {@link #require}. Codecs built via {@code PropertyCodec.of(Class, ...)}
+   * (all built-ins except the two-arg factory) are fully checked.</p>
+   */
   public ConfigFile withAll(final Map<PropertyKey<?>, ?> updates) {
     Objects.requireNonNull(updates, "updates");
     if (updates.isEmpty()) {

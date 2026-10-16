@@ -65,7 +65,7 @@ public record ParseOptions(
    */
   public static ParseOptions lenientAll() {
     return builder()
-      .whitespace(WhitespaceOptions.TRIM)
+      .whitespace(new WhitespaceOptions(true, false))
       .comments(new CommentOptions(
         CommentChars.HASH_AND_SEMICOLON, true, true, true))
       .caseOptions(CaseOptions.WINDOWS)

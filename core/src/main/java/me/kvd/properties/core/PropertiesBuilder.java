@@ -24,7 +24,6 @@ import me.kvd.properties.spi.node.SectionNode;
 public final class PropertiesBuilder {
 
   private final List<Node> nodes = new ArrayList<>();
-  private final Set<String> declaredKeys = new HashSet<>();
   private String currentSection;
 
   public PropertiesBuilder header(final String... lines) {
@@ -67,15 +66,13 @@ public final class PropertiesBuilder {
     Objects.requireNonNull(key, "key");
     Objects.requireNonNull(value, "value");
 
-    // Duplicate detection is per-section. Two sections may declare the
-    // same local key; only a repeated key inside one section is an error.
-    final String qualified = null == this.currentSection
-      ? key.name()
-      : this.currentSection + '.' + key.name();
-    if (!this.declaredKeys.add(qualified)) {
-      throw new IllegalStateException("Duplicate key: " + qualified);
+    if (null != this.currentSection && key.name().contains(".")) {
+      throw new IllegalArgumentException(
+        "Key '" + key.name()
+          + "' must not contain '.' when inside section '"
+          + this.currentSection
+          + "'. Use a nested section via section(...) instead.");
     }
-
     this.nodes.add(new PropertyNode(
       this.currentSection, key.name(), key.codec().encode(value)));
     return this;
