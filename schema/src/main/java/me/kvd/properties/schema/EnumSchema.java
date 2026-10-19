@@ -9,6 +9,7 @@ import me.kvd.properties.PropertyKey;
 import me.kvd.properties.core.ConfigFile;
 import me.kvd.properties.core.ConfigBuilder;
 import me.kvd.properties.exceptions.PropertiesException;
+import me.kvd.properties.exceptions.PropertyValidationException;
 
 /**
  * Builds defaults, validates presence of required keys, and lists constants
@@ -79,8 +80,7 @@ public final class EnumSchema<E extends Enum<E> & ConfigKeyDeclaration> {
   public void validate(final ConfigFile file) {
     final List<String> missing = missing(file);
     if (!missing.isEmpty()) {
-      throw new PropertiesException(
-        "Missing required properties: " + missing);
+      throw new PropertyValidationException(missing);
     }
   }
 
