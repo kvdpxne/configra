@@ -3,10 +3,11 @@ package me.kvd.properties.schema;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import me.kvd.properties.CommentChars;
 import me.kvd.properties.ConfigKeyDeclaration;
 import me.kvd.properties.PropertyKey;
 import me.kvd.properties.core.ConfigFile;
-import me.kvd.properties.core.PropertiesBuilder;
+import me.kvd.properties.core.ConfigBuilder;
 import me.kvd.properties.exceptions.PropertiesException;
 
 /**
@@ -40,14 +41,17 @@ public final class EnumSchema<E extends Enum<E> & ConfigKeyDeclaration> {
   /**
    * Builds a fresh defaults builder with comments above each key.
    */
-  public PropertiesBuilder defaults() {
-    final PropertiesBuilder builder = new PropertiesBuilder();
-    for (final E constant : constants) {
+  public ConfigBuilder defaults() {
+    final ConfigBuilder builder = new ConfigBuilder()
+      .commentChar(CommentChars.SEMICOLON.primary())
+      .spaceAfterComment(true);
+
+    for (final E constant : this.constants) {
       final String comment = constant.comment();
       if (null != comment && !comment.isBlank()) {
-        builder.comment(comment.startsWith("#") || comment.startsWith(";")
-          ? comment
-          : "# " + comment);
+        for (final String line : comment.split("\n")) {
+          builder.comment(line);
+        }
       }
       final PropertyKey<?> key = constant.key();
       if (key.hasDefault()) {
@@ -81,7 +85,7 @@ public final class EnumSchema<E extends Enum<E> & ConfigKeyDeclaration> {
   }
 
   @SuppressWarnings({"unchecked", "rawtypes"})
-  private static void setDefault(final PropertiesBuilder builder,
+  private static void setDefault(final ConfigBuilder builder,
                                  final PropertyKey key) {
     builder.set(key, key.defaultValue());
   }

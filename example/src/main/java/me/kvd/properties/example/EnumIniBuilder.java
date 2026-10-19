@@ -4,7 +4,7 @@ import java.util.Objects;
 import me.kvd.properties.ConfigKeyDeclaration;
 import me.kvd.properties.PropertyKey;
 import me.kvd.properties.core.ConfigFile;
-import me.kvd.properties.core.PropertiesBuilder;
+import me.kvd.properties.core.ConfigBuilder;
 import me.kvd.properties.format.ini.IniFormat;
 import me.kvd.properties.schema.EnumSchema;
 
@@ -27,7 +27,7 @@ public final class EnumIniBuilder {
     Objects.requireNonNull(schema, "schema");
     Objects.requireNonNull(headerLines, "headerLines");
 
-    final PropertiesBuilder builder = new PropertiesBuilder();
+    final ConfigBuilder builder = new ConfigBuilder();
     if (0 < headerLines.length) {
       builder.header(headerLines);
       builder.blank();
@@ -70,7 +70,7 @@ public final class EnumIniBuilder {
   }
 
   @SuppressWarnings({"unchecked", "rawtypes"})
-  private static void setUntyped(final PropertiesBuilder builder,
+  private static void setUntyped(final ConfigBuilder builder,
                                  final String localKey,
                                  final PropertyKey key) {
     builder.set(

@@ -36,6 +36,22 @@ public interface PropertyCodec<T> {
     value -> Long.parseLong(value.trim()),
     Object::toString);
 
+  /**
+   * Single-precision floating point. Encoded via {@link Float#toString(float)},
+   * decoded via {@link Float#parseFloat(String)}.
+   *
+   * <p><b>Precision warning.</b> {@code float} carries ~7 significant
+   * decimal digits. If a value must round-trip exactly (monetary amount,
+   * high-precision scale), prefer {@link #DOUBLE}. Use {@code FLOAT} only
+   * when the target field is genuinely {@code float} — for example when
+   * matching an external API signature — not merely to save memory; a
+   * decimal in a text file occupies the same number of characters
+   * regardless of the parsed type.</p>
+   */
+  PropertyCodec<Float> FLOAT = of(Float.class,
+    value -> Float.parseFloat(value.trim()),
+    Object::toString);
+
   PropertyCodec<Double> DOUBLE = of(Double.class,
     value -> Double.parseDouble(value.trim()),
     Object::toString);

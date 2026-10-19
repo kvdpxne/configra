@@ -81,6 +81,17 @@ public record PropertyKey<T>(
     return new PropertyKey<>(name, PropertyCodec.BOOLEAN, defaultValue);
   }
 
+  /** Required float property. */
+  public static PropertyKey<Float> floatKey(final String name) {
+    return new PropertyKey<>(name, PropertyCodec.FLOAT, null);
+  }
+
+  /** Float property with a fallback default. */
+  public static PropertyKey<Float> floatKey(final String name,
+                                            final float defaultValue) {
+    return new PropertyKey<>(name, PropertyCodec.FLOAT, defaultValue);
+  }
+
   public static PropertyKey<Double> decimal(final String name) {
     return new PropertyKey<>(name, PropertyCodec.DOUBLE, null);
   }

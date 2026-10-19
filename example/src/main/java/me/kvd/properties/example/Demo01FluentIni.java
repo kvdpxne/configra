@@ -5,12 +5,12 @@ import java.nio.file.Path;
 import java.util.List;
 import me.kvd.properties.PropertyKey;
 import me.kvd.properties.core.ConfigFile;
-import me.kvd.properties.core.PropertiesBuilder;
+import me.kvd.properties.core.ConfigBuilder;
 import me.kvd.properties.format.ini.IniFormat;
 import me.kvd.properties.options.WriteOptions;
 
 /**
- * Creates an INI file with the fluent {@link PropertiesBuilder} — no enums,
+ * Creates an INI file with the fluent {@link ConfigBuilder} — no enums,
  * keys declared inline. Demonstrates sections, comments and typed values.
  */
 public final class Demo01FluentIni {
@@ -22,7 +22,7 @@ public final class Demo01FluentIni {
   public static Path run(final Path dir) throws IOException {
     final Path file = dir.resolve("demo01-fluent.ini");
 
-    final ConfigFile config = new PropertiesBuilder()
+    final ConfigFile config = new ConfigBuilder()
       .header("Demo 01 — Fluent INI builder.",
         "No enums. PropertyKey instances created inline.",
         "File: demo01-fluent.ini")
