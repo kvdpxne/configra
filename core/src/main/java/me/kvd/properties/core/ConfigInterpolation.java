@@ -71,15 +71,21 @@ public final class ConfigInterpolation {
     final List<Node> updated = new ArrayList<>(file.nodes().size());
     for (final Node node : file.nodes()) {
       if (node instanceof PropertyNode property) {
-        updated.add(new PropertyNode(property.section(),
+        updated.add(new PropertyNode(
+          property.section(),
           property.key(),
-          resolved.get(property.qualifiedKey())));
+          resolved.get(property.qualifiedKey()),
+          property.line())
+        );
       } else if (node instanceof DisabledPropertyNode disabled) {
         updated.add(new DisabledPropertyNode(
-          disabled.section(), disabled.key(),
+          disabled.section(),
+          disabled.key(),
           resolved.get(disabled.qualifiedKey()),
           disabled.commentPrefix(),
-          disabled.spaceAfterPrefix()));
+          disabled.spaceAfterPrefix(),
+          disabled.line())
+        );
       } else {
         updated.add(node);
       }

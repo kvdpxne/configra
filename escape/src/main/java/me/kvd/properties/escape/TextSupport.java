@@ -55,4 +55,28 @@ public final class TextSupport {
     }
     return 0 != (count & 1);
   }
+
+  /**
+   * Removes leading whitespace from {@code text}.
+   */
+  public static String stripLeading(final String text) {
+    Objects.requireNonNull(text, "text");
+    int i = 0;
+    while (i < text.length() && Character.isWhitespace(text.charAt(i))) {
+      i++;
+    }
+    return text.substring(i);
+  }
+
+  /**
+   * Removes trailing whitespace from {@code text}.
+   */
+  public static String stripTrailing(final String text) {
+    Objects.requireNonNull(text, "text");
+    int end = text.length();
+    while (0 < end && Character.isWhitespace(text.charAt(end - 1))) {
+      end--;
+    }
+    return text.substring(0, end);
+  }
 }

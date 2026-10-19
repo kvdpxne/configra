@@ -615,6 +615,85 @@ public final class ConfigFile implements PropertySource {
       this.source, this.format, this.parseOptions, executor);
   }
 
+  // ----- Serialisation without touching the disk -----
+
+  /**
+   * Appends the serialised form of this file to {@code target} using
+   * {@code options}. Useful for tests, in-memory piping, or embedding the
+   * serialised content in another output.
+   */
+  public void writeTo(final Appendable target, final WriteOptions options)
+    throws IOException {
+    Objects.requireNonNull(target, "target");
+    Objects.requireNonNull(options, "options");
+    target.append(this.format.write(this.nodes, options));
+  }
+
+  /**
+   * Returns the serialised form of this file using the format's default
+   * {@link WriteOptions}. For INI files that means {@link WriteOptions#ini()};
+   * for everything else, {@link WriteOptions#utf8()}.
+   */
+  public String writeToString() {
+    return this.format.write(this.nodes, this.defaultWriteOptions());
+  }
+
+// ----- Interop -----
+
+  /**
+   * Returns a {@link java.util.Properties} populated from this file's value
+   * map. Comments, ordering and disabled keys are not preserved — use this
+   * only for interop with legacy code that expects a {@code Properties}
+   * instance. For the reverse direction, see
+   * {@link java.util.Properties#forEach(java.util.function.BiConsumer)}.
+   */
+  public java.util.Properties toJavaProperties() {
+    final java.util.Properties props = new java.util.Properties();
+    for (final Map.Entry<String, String> entry : this.values.entrySet()) {
+      props.setProperty(entry.getKey(), entry.getValue());
+    }
+    return props;
+  }
+
+// ----- Convenience -----
+
+  /** Returns the number of active (non-disabled) keys. */
+  public int size() {
+    return this.values.size();
+  }
+
+  /**
+   * Returns the 1-based line number of {@code key} in the original source,
+   * or {@code -1} when the key is absent or the {@code ConfigFile} was built
+   * programmatically (no source line info). Both active and disabled nodes
+   * are searched; the first match in file order wins.
+   *
+   * <p>Use this in error messages ("missing key, expected near line X")
+   * rather than as a programmatic lookup — for that use
+   * {@link #contains(PropertyKey)}.</p>
+   */
+  public int indexOf(final PropertyKey<?> key) {
+    Objects.requireNonNull(key, "key");
+    final String target = this.lookupKey(key.name());
+    for (final Node node : this.nodes) {
+      final String nodeKey;
+      final int line;
+      if (node instanceof PropertyNode property) {
+        nodeKey = this.lookupKey(property.qualifiedKey());
+        line = property.line();
+      } else if (node instanceof DisabledPropertyNode disabled) {
+        nodeKey = this.lookupKey(disabled.qualifiedKey());
+        line = disabled.line();
+      } else {
+        continue;
+      }
+      if (nodeKey.equals(target)) {
+        return 0 <= line ? line + 1 : -1;
+      }
+    }
+    return -1;
+  }
+
   // ----- Equality -----
 
   @Override
@@ -655,6 +734,12 @@ public final class ConfigFile implements PropertySource {
 
   // ----- Internals -----
 
+  private WriteOptions defaultWriteOptions() {
+    return ConfigFormats.isIni(this.format)
+      ? WriteOptions.ini()
+      : WriteOptions.utf8();
+  }
+
   private ConfigFile disableInternal(final String qualifiedKey) {
     final String normalizedKey = this.lookupKey(qualifiedKey);
     final List<Node> updated = new ArrayList<>(this.nodes.size());
@@ -666,7 +751,7 @@ public final class ConfigFile implements PropertySource {
         .equals(normalizedKey)) {
         updated.add(new DisabledPropertyNode(
           property.section(), property.key(), property.value(),
-          marker, true));
+          marker, true, property.line()));
         changed = true;
       } else {
         updated.add(node);
@@ -741,8 +826,9 @@ public final class ConfigFile implements PropertySource {
         final String replacement = encoded.get(qualified);
         if (null != replacement) {
           if (pending.remove(qualified)) {
-            updated.add(splitQualified(
-              property.qualifiedKey(), replacement));
+            updated.add(new PropertyNode(
+              property.section(), property.key(), replacement,
+              property.line()));
           }
           continue;
         }
@@ -775,8 +861,9 @@ public final class ConfigFile implements PropertySource {
         && this.lookupKey(property.qualifiedKey())
         .equals(normalizedKey)) {
         if (!replaced) {
-          updated.add(splitQualified(
-            property.qualifiedKey(), encodedValue));
+          updated.add(new PropertyNode(
+            property.section(), property.key(), encodedValue,
+            property.line()));
           replaced = true;
         }
       } else {

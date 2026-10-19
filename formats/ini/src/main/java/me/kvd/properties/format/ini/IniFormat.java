@@ -123,7 +123,7 @@ public final class IniFormat implements ConfigFormat {
         final char head = content.charAt(0);
         if (!options.comments().chars().matches(head) && '[' != head) {
           final String merged = pendingContinuation.value()
-            + '\n' + stripTrailing(content);
+            + '\n' + TextSupport.stripTrailing(content);
           final PropertyNode updated = new PropertyNode(
             pendingContinuation.section(),
             pendingContinuation.key(),
@@ -228,19 +228,19 @@ public final class IniFormat implements ConfigFormat {
           "Missing '=' or ':' in INI line",
           null, lineNumber, line);
       }
-      final String rawKey = stripTrailing(content.substring(0, sep));
+      final String rawKey = TextSupport.stripTrailing(content.substring(0, sep));
       if (rawKey.isEmpty()) {
         throw new PropertyParseException(
           "Empty key in INI line",
           null, lineNumber, line);
       }
 
-      String value = stripLeading(content.substring(sep + 1));
+      String value = TextSupport.stripLeading(content.substring(sep + 1));
       if (options.comments().inline()) {
         value = stripInlineComment(value, options.comments().chars());
       }
       if (options.whitespace().trimTrailing()) {
-        value = stripTrailing(value);
+        value = TextSupport.stripTrailing(value);
       }
       if (options.values().unquote()) {
         value = TextSupport.unquote(value);
@@ -279,7 +279,7 @@ public final class IniFormat implements ConfigFormat {
       }
 
       final PropertyNode node = new PropertyNode(
-        currentCanonicalSection, canonicalKey, value);
+        currentCanonicalSection, canonicalKey, value, lineNumber);
       out.add(node);
       pendingContinuation = options.values().indentedContinuation() ? node : null;
       lineNumber++;
@@ -298,7 +298,7 @@ public final class IniFormat implements ConfigFormat {
       final char c = value.charAt(i);
       if (chars.matches(c)
         && Character.isWhitespace(value.charAt(i - 1))) {
-        return stripTrailing(value.substring(0, i - 1));
+        return TextSupport.stripTrailing(value.substring(0, i - 1));
       }
     }
     return value;
@@ -345,7 +345,8 @@ public final class IniFormat implements ConfigFormat {
         case PropertyNode(
           final String section,
           final String key,
-          final String value
+          final String value,
+          final int line
         ) -> {
           if (null != section
             && !section.equals(lastCanonicalSection)) {
@@ -366,7 +367,8 @@ public final class IniFormat implements ConfigFormat {
           final String key,
           final String value,
           final char prefix,
-          final boolean space
+          final boolean space,
+          final int line
         ) -> {
           if (null != section
             && !section.equals(lastCanonicalSection)) {
@@ -473,7 +475,7 @@ public final class IniFormat implements ConfigFormat {
         if (-1 == sep) {
           continue;
         }
-        final String rawKey = stripTrailing(content.substring(0, sep));
+        final String rawKey = TextSupport.stripTrailing(content.substring(0, sep));
         final String canonicalKey =
           options.keyStyle().toCanonical(rawKey);
         final String lookupKey = options.caseOptions().insensitiveKeys()
@@ -489,13 +491,13 @@ public final class IniFormat implements ConfigFormat {
           : sectionPart + '.' + lookupKey;
 
         if (qualifiedKey.equals(qualified)) {
-          String value = stripLeading(content.substring(sep + 1));
+          String value = TextSupport.stripLeading(content.substring(sep + 1));
           if (options.comments().inline()) {
             value = stripInlineComment(value,
               options.comments().chars());
           }
           if (options.whitespace().trimTrailing()) {
-            value = stripTrailing(value);
+            value = TextSupport.stripTrailing(value);
           }
           if (options.values().unquote()) {
             value = TextSupport.unquote(value);
@@ -540,22 +542,6 @@ public final class IniFormat implements ConfigFormat {
       }
     }
     return -1;
-  }
-
-  private static String stripLeading(final String text) {
-    int i = 0;
-    while (i < text.length() && Character.isWhitespace(text.charAt(i))) {
-      i++;
-    }
-    return text.substring(i);
-  }
-
-  private static String stripTrailing(final String text) {
-    int end = text.length();
-    while (0 < end && Character.isWhitespace(text.charAt(end - 1))) {
-      end--;
-    }
-    return text.substring(0, end);
   }
 
   static BufferedReader buffer(final Reader source) {
@@ -637,18 +623,17 @@ public final class IniFormat implements ConfigFormat {
           if (-1 == sep) {
             continue;
           }
-          final String rawKey =
-            stripTrailing(content.substring(0, sep));
+          final String rawKey = TextSupport.stripTrailing(content.substring(0, sep));
           if (rawKey.isEmpty()) {
             continue;
           }
-          String value = stripLeading(content.substring(sep + 1));
+          String value = TextSupport.stripLeading(content.substring(sep + 1));
           if (this.options.comments().inline()) {
             value = stripInlineComment(value,
               this.options.comments().chars());
           }
           if (this.options.whitespace().trimTrailing()) {
-            value = stripTrailing(value);
+            value = TextSupport.stripTrailing(value);
           }
           if (this.options.values().unquote()) {
             value = TextSupport.unquote(value);
@@ -680,5 +665,10 @@ public final class IniFormat implements ConfigFormat {
   @Override
   public String name() {
     return "ini";
+  }
+
+  @Override
+  public String extension() {
+    return '.' + this.name();
   }
 }

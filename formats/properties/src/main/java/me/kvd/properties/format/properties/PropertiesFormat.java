@@ -73,7 +73,7 @@ public final class PropertiesFormat implements ConfigFormat {
       if (options.comments().chars().matches(line.charAt(firstNonWs))) {
         if (options.comments().parseDisabled()) {
           final DisabledPropertyNode disabled =
-            tryParseDisabled(line, firstNonWs, options);
+            tryParseDisabled(line, logical.lineNumber(), firstNonWs, options);
           if (null != disabled) {
             out.add(disabled);
             lineNumber++;
@@ -136,7 +136,7 @@ public final class PropertiesFormat implements ConfigFormat {
           // .properties has no sections.
         }
         case PropertyNode(final String section, final String key,
-                          final String value) -> {
+                          final String value, final int line) -> {
           final String effective = null == section ? key : section + '.' + key;
           final String styledKey = options.keyStyle().fromCanonical(effective);
           out.append(EscapeCodec.escapeKey(styledKey, escapeNonAscii))
@@ -147,7 +147,7 @@ public final class PropertiesFormat implements ConfigFormat {
         case DisabledPropertyNode(
           final String section, final String key,
           final String value, final char prefix,
-          final boolean space
+          final boolean space, final int line
         ) -> {
           final String effective = null == section ? key : section + '.' + key;
           final String styledKey = options.keyStyle().fromCanonical(effective);
@@ -218,12 +218,12 @@ public final class PropertiesFormat implements ConfigFormat {
       final StringBuilder current = new StringBuilder(128);
       String line;
       while (null != (line = reader.readLine())) {
-        if (!current.isEmpty() && endsWithUnescapedBackslash(current)) {
+        if (!current.isEmpty() && TextSupport.endsWithUnescapedBackslash(current)) {
           current.setLength(current.length() - 1);
           line = line.stripLeading();
         }
         current.append(line);
-        if (endsWithUnescapedBackslash(current)) {
+        if (TextSupport.endsWithUnescapedBackslash(current)) {
           continue;
         }
         final String logical = current.toString();
@@ -299,7 +299,7 @@ public final class PropertiesFormat implements ConfigFormat {
       }
       current.append(line);
 
-      if (endsWithUnescapedBackslash(current)) {
+      if (TextSupport.endsWithUnescapedBackslash(current)) {
         current.setLength(current.length() - 1);
         continuation = true;
         physicalLine++;
@@ -376,7 +376,7 @@ public final class PropertiesFormat implements ConfigFormat {
     final String finalValue = options.values().unquote()
       ? unquote(decodedValue)
       : decodedValue;
-    return new PropertyNode(null, canonicalKey, finalValue);
+    return new PropertyNode(null, canonicalKey, finalValue, logical.lineNumber());
   }
 
   public static String unquote(final String value) {
@@ -384,6 +384,7 @@ public final class PropertiesFormat implements ConfigFormat {
   }
 
   private static DisabledPropertyNode tryParseDisabled(final String line,
+                                                       final int lineNumber,
                                                        final int commentStart,
                                                        final ParseOptions options) {
     final char prefix = line.charAt(commentStart);
@@ -422,7 +423,9 @@ public final class PropertiesFormat implements ConfigFormat {
       EscapeCodec.unescape(rawKey),
       EscapeCodec.unescape(rawValue),
       prefix,
-      space);
+      space,
+      lineNumber
+    );
   }
 
   private static String trimTrailingDelimiterWhitespace(
@@ -507,10 +510,6 @@ public final class PropertiesFormat implements ConfigFormat {
       : new BufferedReader(source);
   }
 
-  static boolean endsWithUnescapedBackslash(final CharSequence text) {
-    return TextSupport.endsWithUnescapedBackslash(text);
-  }
-
   // ----- Iterator -----
 
   private static final class PropertiesIterator
@@ -553,12 +552,12 @@ public final class PropertiesFormat implements ConfigFormat {
         String line;
         while (null != (line = this.reader.readLine())) {
           if (!this.current.isEmpty()
-            && endsWithUnescapedBackslash(this.current)) {
+            && TextSupport.endsWithUnescapedBackslash(this.current)) {
             this.current.setLength(this.current.length() - 1);
             line = line.stripLeading();
           }
           this.current.append(line);
-          if (endsWithUnescapedBackslash(this.current)) {
+          if (TextSupport.endsWithUnescapedBackslash(this.current)) {
             continue;
           }
           final String logical = this.current.toString();
@@ -574,7 +573,7 @@ public final class PropertiesFormat implements ConfigFormat {
           return;
         }
         if (0 < this.current.length()) {
-          if (endsWithUnescapedBackslash(this.current)) {
+          if (TextSupport.endsWithUnescapedBackslash(this.current)) {
             this.current.append('\\');
           }
           final String logical = this.current.toString();
@@ -596,5 +595,10 @@ public final class PropertiesFormat implements ConfigFormat {
   @Override
   public String name() {
     return "properties";
+  }
+
+  @Override
+  public String extension() {
+    return '.' + this.name();
   }
 }

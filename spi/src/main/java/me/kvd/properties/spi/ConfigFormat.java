@@ -108,4 +108,15 @@ public interface ConfigFormat {
   default String name() {
     return this.getClass().getSimpleName().toLowerCase(Locale.ROOT);
   }
+
+  /**
+   * Returns the canonical file extension for this format, including the dot
+   * ({@code ".properties"}, {@code ".ini"}). Used by
+   * {@link me.kvd.properties.core.ConfigFormats} when a format is registered
+   * manually and no {@link ConfigFormatProvider} is present. Defaults to
+   * {@code ""} for third-party formats that do not declare one.
+   */
+  default String extension() {
+    return "";
+  }
 }
