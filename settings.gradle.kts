@@ -29,6 +29,7 @@ include(
   "core",
   "escape",
   "exceptions",
+  "options",
   "schema",
   "spi",
   // Formats
@@ -38,9 +39,9 @@ include(
   "extras:diff",
   "extras:io",
   "extras:watch",
-  "extras:util"
+  "extras:util",
+  // Example
+  "example"
 )
 
-rootProject.name = "properties"
-include("options")
-include("example")
+rootProject.name = "configra"
