@@ -98,7 +98,7 @@ public final class ConfigBuilder {
     return this;
   }
 
-  public ConfigBuilder header(final String... lines) {
+  public ConfigBuilder comments(final String... lines) {
     Objects.requireNonNull(lines, "lines");
     for (final String line : lines) {
       Objects.requireNonNull(line, "line");
@@ -109,8 +109,7 @@ public final class ConfigBuilder {
 
   public ConfigBuilder comment(final String text) {
     Objects.requireNonNull(text, "text");
-    this.nodes.add(new CommentNode(this.prepare(text)));
-    return this;
+    return this.comments(text.split("\n"));
   }
 
   public ConfigBuilder blank() {

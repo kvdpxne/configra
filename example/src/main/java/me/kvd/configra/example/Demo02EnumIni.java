@@ -2,6 +2,8 @@ package me.kvd.configra.example;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import me.kvd.configra.CommentChars;
+import me.kvd.configra.core.ConfigBuilder;
 import me.kvd.configra.core.ConfigFile;
 import me.kvd.configra.example.keys.ServerKeys;
 import me.kvd.configra.format.ini.IniFormat;
@@ -23,10 +25,20 @@ public final class Demo02EnumIni {
     final Path file = dir.resolve("demo02-enum.ini");
 
     final ConfigFile config = EnumDefaults.of(ServerKeys.class)
-      .configure(IniFormat.INSTANCE)
-      .header("Demo 02 — Enum-driven INI.",
-        "Keys declared in ServerKeys, split into sections.",
-        "File: demo02-enum.ini")
+      .configure(
+        true,
+        new ConfigBuilder()
+          .commentChar(CommentChars.SEMICOLON)
+          .blankAfterValues(true)
+          .comment(
+            """
+              Demo 02 — Enum-driven INI.
+              Keys declared in ServerKeys, split into sections.
+              File: demo02-enum.ini
+              """
+          )
+          .blank()
+      )
       .build(IniFormat.INSTANCE);
 
     config.save(file, WriteOptions.ini());

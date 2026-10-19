@@ -23,7 +23,7 @@ public final class Demo01FluentIni {
     final Path file = dir.resolve("demo01-fluent.ini");
 
     final ConfigFile config = new ConfigBuilder()
-      .header("Demo 01 — Fluent INI builder.",
+      .comments("Demo 01 — Fluent INI builder.",
         "No enums. PropertyKey instances created inline.",
         "File: demo01-fluent.ini")
       .blank()
