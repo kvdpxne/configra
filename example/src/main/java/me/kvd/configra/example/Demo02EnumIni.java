@@ -23,7 +23,7 @@ public final class Demo02EnumIni {
     final Path file = dir.resolve("demo02-enum.ini");
 
     final ConfigFile config = EnumDefaults.of(ServerKeys.class)
-      .build(IniFormat.INSTANCE)
+      .configure(IniFormat.INSTANCE)
       .header("Demo 02 — Enum-driven INI.",
         "Keys declared in ServerKeys, split into sections.",
         "File: demo02-enum.ini")

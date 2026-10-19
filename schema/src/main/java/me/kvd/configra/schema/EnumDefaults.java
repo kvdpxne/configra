@@ -50,7 +50,7 @@ public final class EnumDefaults<E extends Enum<E> & ConfigKeyDeclaration> {
   /**
    * Creates a defaults builder bound to {@code schema}. The format is
    * chosen later via {@link #flat()} / {@link #sectioned()} or directly
-   * via {@link #build(ConfigFormat)}.
+   * via {@link #configure(ConfigFormat)}.
    */
   public static <E extends Enum<E> & ConfigKeyDeclaration> EnumDefaults<E> of(
     final EnumSchema<E> schema) {
@@ -70,11 +70,8 @@ public final class EnumDefaults<E extends Enum<E> & ConfigKeyDeclaration> {
    * Returns a builder adapted to {@code format}. INI dialects get sectioned
    * layout; everything else is flat.
    */
-  public ConfigBuilder build(final ConfigFormat format) {
-    Objects.requireNonNull(format, "format");
-    final boolean ini = ConfigFormats.isIni(format);
-    final ConfigBuilder builder = new ConfigBuilder()
-      .commentChar(ini ? ';' : '#');
+  public ConfigBuilder configure(final boolean sectioned, final ConfigBuilder builder) {
+    Objects.requireNonNull(builder, "builder");
 
     String currentSection = null;
     for (final E constant : this.schema.constants()) {
@@ -83,7 +80,7 @@ public final class EnumDefaults<E extends Enum<E> & ConfigKeyDeclaration> {
 
       final String section;
       final String localKey;
-      if (ini) {
+      if (sectioned) {
         final int dot = fullName.lastIndexOf('.');
         if (0 < dot && dot < fullName.length() - 1) {
           section = fullName.substring(0, dot);
