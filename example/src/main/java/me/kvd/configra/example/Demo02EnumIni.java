@@ -13,7 +13,7 @@ import me.kvd.configra.schema.EnumDefaults;
 /**
  * Creates an INI file from an enum schema. Every key in {@link ServerKeys}
  * declares a fully qualified name ({@code section.key}), a default and one
- * or more comment lines; {@link EnumIniBuilder} assembles the file.
+ * or more comment lines; {@link EnumDefaults} assembles the file.
  */
 public final class Demo02EnumIni {
 

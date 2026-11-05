@@ -348,6 +348,11 @@ public final class ConfigFile implements PropertySource {
     return this.find(key).orElse(fallback);
   }
 
+  public <T> T get(final PropertyKey<T> key) {
+    Objects.requireNonNull(key, "key");
+    return this.getOrElse(key, key.defaultValue());
+  }
+
   public boolean contains(final PropertyKey<?> key) {
     Objects.requireNonNull(key, "key");
     return this.values.containsKey(this.lookupKey(key.name()));
@@ -371,6 +376,12 @@ public final class ConfigFile implements PropertySource {
     Objects.requireNonNull(declaration, "declaration");
     Objects.requireNonNull(fallback, "fallback");
     return this.getOrElse((PropertyKey<T>) declaration.key(), fallback);
+  }
+
+  @SuppressWarnings("unchecked")
+  public <T> T get(final ConfigKeyDeclaration declaration) {
+    Objects.requireNonNull(declaration, "declaration");
+    return this.get((PropertyKey<T>) declaration.key());
   }
 
   public boolean contains(final ConfigKeyDeclaration declaration) {
